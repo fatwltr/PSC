@@ -33,8 +33,14 @@ public:
     void count_eq(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand,
                   int32_t bw_data, int32_t bw_res);
 
+    void count_eq_batch(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand,
+                        int32_t bw_data, int32_t bw_res);
+
     void count_shift(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand, int32_t bw_data,
                      int32_t bw_res);
+
+    void count_shift_batch(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand,
+                           int32_t bw_data, int32_t bw_res);
 
     void count_eq_inner_self(uint64_t *res, uint64_t *data, int num_data, int num_stand, int32_t bw_data,
                              int32_t bw_res);
@@ -42,8 +48,11 @@ public:
     void mode_naive(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand, int32_t bw_data,
                     int32_t bw_res, uint8_t eq);
 
-    void mode_CRT(uint64_t* res, uint64_t *data, int num_data, uint64_t *stand, int num_stand, int32_t bw_data,
-                  int32_t bw_res, uint8_t eq);
+    void mode_CRT_eq(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand, int32_t bw_data,
+                     int32_t bw_res);
+
+    void mode_CRT_shift(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand, int32_t bw_data,
+                        int32_t bw_res);
 };
 
 #endif

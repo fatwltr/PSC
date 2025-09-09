@@ -66,8 +66,8 @@ void ln_thread(int tid, uint64_t *x, uint64_t *y, int num_ops) {
     } else {
         math = new MathFunctions(party, iopackArr[tid], otpackArr[tid]);
     }
-    // math->ln_v2(num_ops, x, y, bw_x, bw_y, s_x, s_y);
-    math->ln(num_ops, x, y, bw_x, bw_y, s_x, s_y);
+    math->ln_v2(num_ops, x, y, bw_x, bw_y, s_x, s_y);
+    // math->ln(num_ops, x, y, bw_x, bw_y, s_x, s_y);
 
     delete math;
 }
@@ -113,10 +113,16 @@ int main(int argc, char **argv) {
     } else {
         uint64_t *x0 = new uint64_t[dim];
         iopackArr[0]->io->recv_data(x0, dim * sizeof(uint64_t));
-        x[0] = 0x7d40cccc;
-        // x[1] = 0b10000010;
+        // x[0] = 0x7d40cccc;
+        // x[0] = 0b11000010;
+
+        double log_min = std::log2(0.0001);
+        double log_max = std::log2(10000);
+        double step = (log_max - log_min) / (100 - 1);
+
         for (int i = 0; i < dim; i++) {
-            x[i] &= (mask_x >> 8);
+            x[i] = (uint64_t)(std::pow(2, log_min + i * step) * (1 << s_x));
+            x[i] &= (mask_x >> 1);
             x[i] = (x[i] - x0[i]);
         }
         delete[] x0;
@@ -177,7 +183,7 @@ int main(int argc, char **argv) {
             double ln_x;
             ln_x = log(dbl_x);
             uint64_t err = computeULPErr(dbl_y, ln_x, s_y);
-            if (err > 0) {
+            if (err > 0 or err == 0) {
                 cout << "ULP Error: " << dbl_x << "," << dbl_y << "," << ln_x << ","
                         << err << endl;
             }

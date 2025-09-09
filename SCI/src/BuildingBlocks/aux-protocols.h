@@ -177,10 +177,14 @@ public:
                   uint8_t *one_hot_vector, int32_t bw_x, int32_t size);
 
 
-    void nMinus1OUTNOT(sci::block128 *seeds, uint64_t length, uint64_t offset);
+    void nMinus1OUTNOT(sci::block128 *seeds, uint64_t length, uint64_t offset, uint8_t thread_used);
+
+    void nMinus1OUTNOT_batch(sci::block128 *seeds,uint64_t batch_size, uint64_t length, uint64_t* offset);
 
     // set the corresponding value at once -- naive
-    void uniShare_naive_bool(uint8_t *uniShr, int length, uint64_t offset);
+    void uniShare_naive_bool(uint8_t *uniShr, int length, uint64_t offset, uint8_t thread_used);
+
+    void uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, int length, uint64_t *offset);
 
     void multiplexer_two_plain(uint8_t *sel, uint64_t *x, uint64_t *y,
                                int32_t size, int32_t bw_x, int32_t bw_y);

@@ -26,6 +26,7 @@ SOFTWARE.
 #include <iomanip>
 
 #include "frequency.h"
+
 #include "BuildingBlocks/truncation.h"
 #include "BuildingBlocks/value-extension.h"
 
@@ -84,6 +85,51 @@ void Frequency::count_eq(uint64_t *res, uint64_t *data, int num_data, uint64_t *
     delete[] t;
 }
 
+
+void Frequency::count_eq_batch(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand,
+                               int32_t bw_data,
+                               int32_t bw_res) {
+    uint8_t *temp = new uint8_t[num_data * num_stand]();
+    uint64_t mask_data = (bw_data == 64 ? -1 : ((1ULL << bw_data) - 1));
+    uint64_t mask_res = (bw_res == 64 ? -1 : ((1ULL << bw_res) - 1));
+    uint64_t *t = new uint64_t[num_data * num_stand]();
+    if (party == ALICE) {
+        for (int i = 0; i < num_stand; i++) {
+            for (int j = 0; j < num_data; j++) {
+                t[i * num_data + j] = (stand[i] - data[j] + num_stand) % num_stand;
+            }
+        }
+        equality->check_equality(temp, t, num_data * num_stand, bw_data);
+        aux->B2A(temp, t, num_data * num_stand, bw_res);
+        for (int i = 0; i < num_stand; i++) {
+            for (int j = 0; j < num_data; j++) {
+                res[i] += t[i * num_data + j];
+                res[i] &= mask_res;
+            }
+            res[i] &= mask_res;
+        }
+    } else {
+        for (int i = 0; i < num_stand; i++) {
+            for (int j = 0; j < num_data; j++) {
+                t[i * num_data + j] = (data[j] + num_stand) % num_stand;
+            }
+        }
+        equality->check_equality(temp, t, num_data * num_stand, bw_data);
+        aux->B2A(temp, t, num_data * num_stand, bw_res);
+        for (int i = 0; i < num_stand; i++) {
+            for (int j = 0; j < num_data; j++) {
+                res[i] += t[i * num_data + j];
+                res[i] &= mask_res;
+            }
+            res[i] &= mask_res;
+        }
+    }
+
+    delete[] temp;
+    delete[] t;
+}
+
+
 // to count the frequency of specific number.
 // the input is in Z/{num_stand}Z and the result is in Z/{2^{bw_res}}Z.
 void Frequency::count_shift(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand,
@@ -93,8 +139,9 @@ void Frequency::count_shift(uint64_t *res, uint64_t *data, int num_data, uint64_
     uint64_t mask_res = (bw_res == 64 ? -1 : ((1ULL << bw_res) - 1));
     uint64_t *t = new uint64_t[num_stand];
     for (int i = 0; i < num_data; i++) {
-        aux->uniShare_naive_bool(t_shifted, num_stand, data[i] % num_stand);
-        aux->B2A(t_shifted, t, num_stand, bw_res);
+        // too many communication rounds, batch and packet some num_data
+        aux->uniShare_naive_bool(t_shifted, num_stand, data[i] % num_stand, 0);
+        aux->B2A(t_shifted, t, num_stand, bw_res); // B2A need batch more message
         for (int j = 0; j < num_stand; j++) {
             res[j] += t[j];
             res[j] &= mask_res;
@@ -103,6 +150,28 @@ void Frequency::count_shift(uint64_t *res, uint64_t *data, int num_data, uint64_
     delete[] t_shifted;
     delete[] t;
 }
+
+
+void Frequency::count_shift_batch(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand,
+                                  int32_t bw_data, int32_t bw_res) {
+    uint8_t *t_shifted = new uint8_t[num_stand * num_data];
+    uint64_t mask_res = (bw_res == 64 ? -1 : ((1ULL << bw_res) - 1));
+    uint64_t *t = new uint64_t[num_stand * num_data];
+    for (int i = 0; i < num_data; i++) {
+        data[i] = data[i] % num_stand;
+    }
+    aux->uniShare_naive_bool_batch(t_shifted, num_data, num_stand, data);
+    aux->B2A(t_shifted, t, num_data * num_stand, bw_res);
+    for (int i = 0; i < num_data; i++) {
+        for (int j = 0; j < num_stand; j++) {
+            res[j] += t[i * num_stand + j];
+            res[j] &= mask_res;
+        }
+    }
+    delete[] t;
+    delete[] t_shifted;
+}
+
 
 // used for the mode function
 void Frequency::count_eq_inner_self(uint64_t *res, uint64_t *data, int num_data, int num_stand, int32_t bw_data,
@@ -155,9 +224,9 @@ void Frequency::mode_naive(uint64_t *res, uint64_t *data, int num_data, uint64_t
     int count_len;
     if (eq == 1) {
         // if (num_data > num_stand) {
-            count_len = num_stand;
-            count = new uint64_t[count_len]();
-            count_eq(count, data, num_data, stand, num_stand, bw_data, bw_res + 1);
+        count_len = num_stand;
+        count = new uint64_t[count_len]();
+        count_eq_batch(count, data, num_data, stand, num_stand, bw_data, bw_res + 1);
         // } else {
         //     count_len = num_data;
         //     count = new uint64_t[count_len]();
@@ -170,7 +239,7 @@ void Frequency::mode_naive(uint64_t *res, uint64_t *data, int num_data, uint64_t
     } else {
         count_len = num_stand;
         count = new uint64_t[count_len]();
-        count_shift(count, data, num_data, stand, num_stand, bw_data, bw_res + 1);
+        count_shift_batch(count, data, num_data, stand, num_stand, bw_data, bw_res + 1);
     }
     // cout << endl << bw_res + 1 << " " << "count: ";
     // for (int i = 0; i < count_len; i++) {
@@ -280,8 +349,8 @@ int64_t mod_inverse(int64_t a, int64_t m) {
 }
 
 
-void Frequency::mode_CRT(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand,
-                         int32_t bw_data, int32_t bw_res, uint8_t eq = 0) {
+void Frequency::mode_CRT_eq(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand,
+                            int32_t bw_data, int32_t bw_res) {
     vector<uint64_t> fragment_modulus = findMinSumOverM(num_stand);
     uint64_t num_fragments = fragment_modulus.size();
     uint64_t prod = 1;
@@ -329,7 +398,8 @@ void Frequency::mode_CRT(uint64_t *res, uint64_t *data, int num_data, uint64_t *
         for (int i = 0; i < num_fragments; i++) {
             int bw_data_t = ceil(log2(fragment_modulus[i] + 1));
             // the bw_res + 1 aims to locally transfer the share compare to two numbers for mill->compare()
-            count_shift(res_t[i], data_fragments[i], num_data, stand, fragment_modulus[i], bw_data_t, bw_res + 1);
+            // count_shift(res_t[i], data_fragments[i], num_data, stand, fragment_modulus[i], bw_data_t, bw_res + 1);
+            count_eq_batch(res_t[i], data_fragments[i], num_data, stand, fragment_modulus[i], bw_data_t, bw_res + 1);
             // cout << "bw_res + 1: " << bw_res + 1 << endl;
             // for (int j = 0; j < fragment_modulus[i]; j++) {
             //     cout << res_t[i][j] << ", ";
@@ -379,7 +449,7 @@ void Frequency::mode_CRT(uint64_t *res, uint64_t *data, int num_data, uint64_t *
         uint64_t N_trans;
         for (int i = 0; i < num_fragments; i++) {
             int bw_data_t = ceil(log2(fragment_modulus[i] + 1));
-            count_shift(res_t[i], data_fragments[i], num_data, stand, fragment_modulus[i], bw_data_t, bw_res + 1);
+            count_eq_batch(res_t[i], data_fragments[i], num_data, stand, fragment_modulus[i], bw_data_t, bw_res + 1);
             // cout << "bw_res + 1: " << bw_res + 1 << endl;
             // for (int j = 0; j < fragment_modulus[i]; j++) {
             //     cout << res_t[i][j] << ", ";
@@ -418,6 +488,82 @@ void Frequency::mode_CRT(uint64_t *res, uint64_t *data, int num_data, uint64_t *
 
     delete[] t_ge_stand;
     delete[] conversion_fragments;
+    delete maxpool_oracle;
+    for (int i = 0; i < num_fragments; i++) {
+        delete[] data_fragments[i];
+        delete[] res_t[i];
+    }
+    delete[] max_fragments;
+    delete[] data_fragments;
+    delete[] res_t;
+}
+
+
+void Frequency::mode_CRT_shift(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand,
+                               int32_t bw_data, int32_t bw_res) {
+    vector<uint64_t> fragment_modulus = findMinSumOverM(num_stand);
+    uint64_t num_fragments = fragment_modulus.size();
+    uint64_t prod = 1;
+    for (int i = 0; i < num_fragments; i++) {
+        prod = prod * fragment_modulus[i];
+    }
+    uint64_t *res_count = new uint64_t[num_stand]();
+    auto **data_fragments = new uint64_t *[num_fragments];
+    auto res_t = new uint64_t *[num_fragments];
+    for (int i = 0; i < num_fragments; ++i) {
+        data_fragments[i] = new uint64_t[num_data];
+        res_t[i] = new uint64_t[fragment_modulus[i]]();
+    }
+    auto *maxpool_oracle = new MaxPoolProtocol<uint64_t>(
+        party, RING, iopack, bw_res + 1, 4, 0, otpack);
+    auto *max_fragments = new uint64_t[num_fragments]();
+    count_shift_batch(res_count, data, num_data, stand, num_stand, bw_data, bw_res + 1);
+    if (party == sci::ALICE) {
+        uint64_t tt;
+        uint8_t t_ge;
+        uint64_t N_trans;
+        for (int i = 0; i < num_fragments; i++) {
+            int bw_data_t = ceil(log2(fragment_modulus[i] + 1));
+            for (int j = 0; j < num_stand; j++) {
+                res_t[i][j % fragment_modulus[i]] += res_count[j];
+                res_t[i][j % fragment_modulus[i]] &= (1ULL << (bw_res + 1)) - 1;
+            }
+            maxpool_oracle->funcMaxMPC_spcial(fragment_modulus[i], res_t[i], &tt, &max_fragments[i], bw_data_t);
+            tt = (1 << bw_data_t) - max_fragments[i];
+            aux->mill->compare(&t_ge, &tt, 1, bw_data_t);
+            t_ge ^= 1;
+            aux->B2A_coprimes(&t_ge, &N_trans, 1, vector<uint64_t>{prod});
+            max_fragments[i] = ((max_fragments[i] + prod - (1 << bw_data_t) * N_trans % prod)) % prod;
+        }
+    } else {
+        uint64_t tt;
+        uint8_t t_ge;
+        uint64_t N_trans;
+        for (int i = 0; i < num_fragments; i++) {
+            int bw_data_t = ceil(log2(fragment_modulus[i] + 1));
+            for (int j = 0; j < num_stand; j++) {
+                res_t[i][j % fragment_modulus[i]] += res_count[j];
+                res_t[i][j % fragment_modulus[i]] &= (1ULL << (bw_res + 1)) - 1;
+            }
+            maxpool_oracle->funcMaxMPC_spcial(fragment_modulus[i], res_t[i], &tt, &max_fragments[i], bw_data_t);
+            aux->mill->compare(&t_ge, &max_fragments[i], 1, bw_data_t);
+            aux->B2A_coprimes(&t_ge, &N_trans, 1, vector<uint64_t>{prod});
+            max_fragments[i] = ((max_fragments[i] + prod - (1 << bw_data_t) * N_trans % prod)) % prod;
+        }
+    }
+
+    uint64_t Mi = 1;
+    uint64_t yi = 1;
+    cout << endl << "prod: " << prod << endl;
+    res[0] = 0;
+    for (int i = 0; i < num_fragments; i++) {
+        Mi = prod / fragment_modulus[i];
+        yi = mod_inverse(Mi, fragment_modulus[i]);
+        res[0] += (max_fragments[i] * Mi * yi) % prod;
+        res[0] %= prod;
+    }
+
+    delete[] res_count;
     delete maxpool_oracle;
     for (int i = 0; i < num_fragments; i++) {
         delete[] data_fragments[i];

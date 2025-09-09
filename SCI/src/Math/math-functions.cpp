@@ -942,10 +942,10 @@ void MathFunctions::exp(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x,
     lookup_table_exp(dim, adjusted_x, res, bw_x, bw_y, s_x, s_y);
     if (party == ALICE) {
         std::fill(tmp1, tmp1 + dim, (1ULL << s_x));
-        div(dim, tmp1, res, tmp2,bw_x, bw_x, bw_x, s_x, s_x, s_x, true, true);
+        div(dim, tmp1, res, tmp2, bw_x, bw_x, bw_x, s_x, s_x, s_x, true, true);
     } else {
         std::fill(tmp1, tmp1 + dim, 0);
-        div(dim, tmp1, res, tmp2,bw_x, bw_x, bw_x, s_x, s_x, s_x, true, true);
+        div(dim, tmp1, res, tmp2, bw_x, bw_x, bw_x, s_x, s_x, s_x, true, true);
     }
     for (int i = 0; i < dim; i++) {
         tmp1[i] = tmp2[i] - res[i];
@@ -1045,58 +1045,50 @@ void MathFunctions::ln(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, int3
     uint64_t *res = new uint64_t[dim]();
 
 
-    trunc->truncate_and_reduce(dim, adjusted_x, tmp, bw_x - 2 - 1, bw_x - 2);
+    trunc->truncate_and_reduce(dim, adjusted_x, tmp, bw_x - 2 - 2, bw_x - 2);
     // reduce the sign bit and the integer part 1
     if (party == ALICE) {
         for (int i = 0; i < dim; i++) {
-            tmp[i] = 2 - tmp[i];
+            tmp[i] = 4 - tmp[i];
         }
     }
-    equality->check_equality(lethan2, tmp, dim, 1);
+    equality->check_equality(lethan4, tmp, dim, 2);
 
-    // set the corresponding r, which is in [0, 1/2] that evaluated by the Taylor series
+
+    // cout << "lethan4: " << endl;
+    // for (int i = 0; i < dim; i++) {
+    //     cout << (uint32_t)lethan4[i] << " ";
+    // }
+    // cout << endl;
+
+    cout << endl;
+    cout << "1-2: ";
+    for (int i = 0; i < dim; i++) {
+        cout << adjusted_x[i] << " ";
+    }
+    cout << endl;
+
+    if (party == ALICE) {
+        std::fill(tmp, tmp + dim, (0b11ULL << (bw_x - 3)));
+        div(dim, tmp, adjusted_x, tmp2, bw_x - 1, bw_x - 1, bw_x - 1, bw_x - 2, bw_x - 2, bw_x - 2, false, false);
+    } else {
+        std::fill(tmp, tmp + dim, 0);
+        div(dim, tmp, adjusted_x, tmp2, bw_x - 1, bw_x - 1, bw_x - 1, bw_x - 2, bw_x - 2, bw_x - 2, false, false);
+    }
+
+
+    cout << endl;
+    cout << "0.75-1.25: ";
+    for (int i = 0; i < dim; i++) {
+        cout << tmp2[i] << " ";
+    }
+    cout << endl;
+
     for (int i = 0; i < dim; i++) {
         r_convert[i] = adjusted_x[i];
         r_convert[i] &= mask_adjust;
     }
 
-
-    aux->wrap_computation(r_convert, tmp_bool, dim, bw_x - 1);
-    aux->multiplexer_two_plain(tmp_bool, (1ULL << (bw_x - 1)) / 4, tmp4, dim, bw_x - 1, bw_x - 1);
-
-
-    for (int i = 0; i < dim; i++) {
-        r_convert[i] /= 4;
-        r_convert[i] -= tmp4[i];
-        r_convert[i] = adjusted_x[i] - r_convert[i];
-        r_convert[i] &= mask_adjust;
-    }
-
-    for (int i = 0; i < dim; i++) {
-        tmp4[i] = adjusted_x[i] - r_convert[i];
-        tmp4[i] &= mask_adjust;
-    }
-    aux->multiplexer(lethan2, tmp4, res, dim, bw_x - 1, bw_x - 1);
-    for (int i = 0; i < dim; i++) {
-        res[i] += r_convert[i];
-        res[i] &= mask_adjust;
-    }
-
-
-
-    if (party == ALICE) {
-        for (int i = 0; i < dim; i++) {
-            res[i] -= (1ULL << (bw_x - 2 - 2));
-            res[i] &= mask_adjust;
-        }
-    }
-
-    cout << endl;
-    cout << "0.75-1.25: ";
-    for (int i = 0; i < dim; i++) {
-        cout << res[i] << " ";
-    }
-    cout << endl;
 
     // Taylor series
     uint64_t *resP2 = new uint64_t[dim]();
@@ -1220,26 +1212,6 @@ void MathFunctions::ln(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, int3
         tmp2[i] += convert_res[i];
     }
 
-    // lethan2
-    if (party == ALICE) {
-        for (int i = 0; i < dim; i++) {
-            convert_res[i] = (uint64_t) (log(2.0) * (1 << (s_x))) - tmp2[i];
-            convert_res[i] &= ((1ULL << bw_x) - 1);
-        }
-    } else {
-        for (int i = 0; i < dim; i++) {
-            convert_res[i] = 0ULL - tmp2[i];
-            convert_res[i] &= ((1ULL << bw_x) - 1);
-        }
-    }
-
-    for (int i = 0; i < dim; i++) {
-        tmp[i] = tmp2[i] - convert_res[i];
-    }
-    aux->multiplexer(lethan2, tmp, tmp4, dim, bw_x, bw_x);
-    for (int i = 0; i < dim; i++) {
-        tmp4[i] += convert_res[i];
-    }
     // tmp4 store the ln part
 
 

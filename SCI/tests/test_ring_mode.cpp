@@ -58,7 +58,13 @@ int main(int argc, char **argv) {
 
     uint64_t comm = iopack->get_comm();
     if (crt == 1) {
-        frequency->mode_CRT(&res, data, num_data, stand, num_stand, bw_data, bw_res, eq);
+        if (eq == 0) {
+            frequency->mode_CRT_shift(&res, data, num_data, stand, num_stand, bw_data, bw_res);
+        }
+        else {
+            frequency->mode_CRT_eq(&res, data, num_data, stand, num_stand, bw_data, bw_res);
+        }
+
     } else {
         frequency->mode_naive(&res, data, num_data, stand, num_stand, bw_data, bw_res, eq);
     }
@@ -70,27 +76,27 @@ int main(int argc, char **argv) {
     cout << "Time\t" << t / (1000.0) << " ms" << endl;
     cout << "Bytes Sent\t" << comm << " bytes" << endl;
 
-    if (party == ALICE) {
-        iopack->io->send_data(data, num_data * sizeof(uint64_t));
-        iopack->io->send_data(&res, 1 * sizeof(uint64_t));
-    } else {
-        uint64_t t_res = 0;
-        uint64_t *t_data = new uint64_t[num_data];
-        iopack->io->recv_data(t_data, num_data * sizeof(uint64_t));
-        iopack->io->recv_data(&t_res, 1 * sizeof(uint64_t));
-
-        // for (int i = 0; i < num_data; ++i) {
-        //     data[i] += t_data[i];
-        //     data[i] %= num_stand;
-        //     cout << data[i] << ", ";
-        // }
-        // cout << endl;
-        res += t_res;
-        // res &= (1 << bw_res) - 1;
-
-        cout << "the mode is: " << res << endl;
-        delete [] t_data;
-    }
+    // if (party == ALICE) {
+    //     iopack->io->send_data(data, num_data * sizeof(uint64_t));
+    //     iopack->io->send_data(&res, 1 * sizeof(uint64_t));
+    // } else {
+    //     uint64_t t_res = 0;
+    //     uint64_t *t_data = new uint64_t[num_data];
+    //     iopack->io->recv_data(t_data, num_data * sizeof(uint64_t));
+    //     iopack->io->recv_data(&t_res, 1 * sizeof(uint64_t));
+    //
+    //     // for (int i = 0; i < num_data; ++i) {
+    //     //     data[i] += t_data[i];
+    //     //     data[i] %= num_stand;
+    //     //     cout << data[i] << ", ";
+    //     // }
+    //     // cout << endl;
+    //     res += t_res;
+    //     // res &= (1 << bw_res) - 1;
+    //
+    //     cout << "the mode is: " << res << endl;
+    //     delete [] t_data;
+    // }
 
     delete[] data;
     delete[] stand;

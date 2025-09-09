@@ -120,7 +120,6 @@ void AuxProtocols::B2A(uint8_t *x, uint64_t *y, int32_t size, int32_t bw_y) {
             corr_data[i] = (-2 * uint64_t(x[i])) & mask;
         }
         otpack->iknp_straight->send_cot(y, corr_data, size, bw_y);
-
         for (int i = 0; i < size; i++) {
             y[i] = (uint64_t(x[i]) - y[i]) & mask;
         }
@@ -128,7 +127,6 @@ void AuxProtocols::B2A(uint8_t *x, uint64_t *y, int32_t size, int32_t bw_y) {
     } else {
         // party == sci::BOB
         otpack->iknp_straight->recv_cot(y, (bool *) x, size, bw_y);
-
         for (int i = 0; i < size; i++) {
             y[i] = (uint64_t(x[i]) + y[i]) & mask;
         }
@@ -885,7 +883,7 @@ void print_block(const block128 &b) {
 // GGM_leaves: the result of (n-1, n)-OT
 // length: the length of GGM_leaves
 // offset: the punctured index of GGM_leaves, which is set by one of the parties.
-void AuxProtocols::nMinus1OUTNOT(block128 *seed, uint64_t length, uint64_t offset) {
+void AuxProtocols::nMinus1OUTNOT(block128 *seed, uint64_t length, uint64_t offset, uint8_t thread_used = 0) {
     const int tree_depth = static_cast<int>(std::ceil(std::log2(length)));
     const int leaves_size = static_cast<int>(std::pow(2, tree_depth));
     auto *GGM_leaves = new block128[leaves_size]();
@@ -935,7 +933,11 @@ void AuxProtocols::nMinus1OUTNOT(block128 *seed, uint64_t length, uint64_t offse
         }
 
         delete[] temp_data;
-        otpack->iknp_straight->send(layer_OT_sum_seed[0], layer_OT_sum_seed[1], tree_depth);
+        if (thread_used == 0) {
+            otpack->iknp_straight->send(layer_OT_sum_seed[0], layer_OT_sum_seed[1], tree_depth);
+        } else {
+            otpack->iknp_reversed->send(layer_OT_sum_seed[0], layer_OT_sum_seed[1], tree_depth);
+        }
         // #ifndef NDEBUG
         //         std::cout << std::endl;
         //         for (int i = 0; i < leaves_size; i++) {
@@ -953,7 +955,11 @@ void AuxProtocols::nMinus1OUTNOT(block128 *seed, uint64_t length, uint64_t offse
         for (int i = 1; i <= tree_depth; i++) {
             r[i - 1] = (offset >> (tree_depth - i) & 1) ^ 1; // extract i-th bit
         }
-        otpack->iknp_straight->recv(layer_OT_sum_seed, r, tree_depth);
+        if (thread_used == 0) {
+            otpack->iknp_straight->recv(layer_OT_sum_seed, r, tree_depth);
+        } else {
+            otpack->iknp_reversed->recv(layer_OT_sum_seed, r, tree_depth);
+        }
 
         // build the punctured tree
         // the parameters of layer1
@@ -1017,6 +1023,154 @@ void AuxProtocols::nMinus1OUTNOT(block128 *seed, uint64_t length, uint64_t offse
 }
 
 
+// batch aims to make n times m length to nm length
+void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint64_t length, uint64_t *offset) {
+    const int tree_depth = static_cast<int>(std::ceil(std::log2(length)));
+    const int leaves_size = static_cast<int>(std::pow(2, tree_depth));
+    auto *batch_GGM_leaves = new block128[batch_size * length]();
+    PRG128 prg;
+    if (party == sci::ALICE) {
+        block128 *my_seed = new block128[batch_size];
+        prg.random_block(my_seed, batch_size);
+        auto **layer_OT_sum_seed = new block128 *[2];
+        layer_OT_sum_seed[0] = new block128[tree_depth * batch_size];
+        layer_OT_sum_seed[1] = new block128[tree_depth * batch_size];
+        // build tree
+        for (int i = 0; i < batch_size; i++) {
+            batch_GGM_leaves[i * length] = my_seed[i];
+        }
+        auto *temp_data = new block128[2];
+        // parameters for layer0
+        uint32_t points_this_layer = 1;
+        uint32_t step_size = leaves_size / points_this_layer;
+        uint32_t step_size_last_layer = 2 * step_size;
+        uint32_t points_last_layer = points_this_layer / 2;
+        for (int i = 1; i <= tree_depth; i++) {
+            points_this_layer *= 2;
+            step_size = leaves_size / points_this_layer;
+            step_size_last_layer = 2 * step_size;
+            points_last_layer = points_this_layer / 2;
+            for (int j = 0; j < points_last_layer; j++) {
+                // see through the nodes in each layer
+                for (int k = 0; k < batch_size; k++) {
+                    prg.reseed(&batch_GGM_leaves[k * length + j * step_size_last_layer]);
+                    prg.random_block(temp_data, 2);
+                    batch_GGM_leaves[k * length + j * step_size_last_layer] = temp_data[0];
+                    batch_GGM_leaves[k * length + j * step_size_last_layer + step_size] = temp_data[1];
+                }
+            }
+            for (int k = 0; k < batch_size; k++) {
+                layer_OT_sum_seed[0][k * tree_depth + i - 1] = batch_GGM_leaves[k * length + 0];
+                layer_OT_sum_seed[1][k * tree_depth + i - 1] = batch_GGM_leaves[k * length + step_size];
+                for (int j = 2; j < points_this_layer; j += 2) {
+                    layer_OT_sum_seed[0][k * tree_depth + i - 1] = _mm_xor_si128(
+                        layer_OT_sum_seed[0][k * tree_depth + i - 1],
+                        batch_GGM_leaves[k * length + j * step_size]);
+                    layer_OT_sum_seed[1][k * tree_depth + i - 1] = _mm_xor_si128(
+                        layer_OT_sum_seed[1][k * tree_depth + i - 1],
+                        batch_GGM_leaves[k * length + (j + 1) * step_size]);
+                }
+            }
+            // std::cout << std::endl;
+            // for (int ii = 0; ii < leaves_size; ii++) {
+            //     print_block(batch_GGM_leaves[ii]);
+            // }
+            // std::cout << std::endl;
+        }
+
+        delete[] temp_data;
+        otpack->iknp_straight->send(layer_OT_sum_seed[0], layer_OT_sum_seed[1], (tree_depth * batch_size));
+
+        // #ifndef NDEBUG
+        // std::cout << std::endl;
+        // for (int i = 0; i < leaves_size; i++) {
+        //     print_block(batch_GGM_leaves[i]);
+        // }
+        // std::cout << std::endl;
+        // #endif
+        for (int i = 0; i < 2; i++) {
+            delete[] layer_OT_sum_seed[i];
+        }
+        delete[] layer_OT_sum_seed;
+    } else {
+        auto r = new bool[tree_depth * batch_size];
+        auto *layer_OT_sum_seed = new block128[tree_depth * batch_size];
+        for (int i = 1; i <= tree_depth; i++) {
+            for (int k = 0; k < batch_size; k++) {
+                r[k * tree_depth + i - 1] = (offset[k] >> (tree_depth - i) & 1) ^ 1; // extract i-th bit
+            }
+        }
+        otpack->iknp_straight->recv(layer_OT_sum_seed, r, tree_depth * batch_size);
+        // build the punctured tree
+        // the parameters of layer1
+        uint32_t points_this_layer = 2;
+        uint32_t step_size = leaves_size / points_this_layer;
+        uint32_t step_size_last_layer = 2 * step_size;
+        uint32_t points_last_layer = points_this_layer / 2;
+        uint32_t skip_index = 0;
+        auto *temp_data = new block128[2];
+        for (int k = 0; k < batch_size; k++) {
+            points_this_layer = 2;
+            step_size = leaves_size / points_this_layer;
+            step_size_last_layer = 2 * step_size;
+            points_last_layer = points_this_layer / 2;
+            skip_index = r[0 + k * tree_depth] ^ 1;
+            batch_GGM_leaves[k * length + r[0 + k * tree_depth] * step_size] = layer_OT_sum_seed[0 + k * tree_depth];
+            for (int i = 2; i <= tree_depth; i++) {
+                points_this_layer *= 2;
+                step_size = leaves_size / points_this_layer;
+                step_size_last_layer = 2 * step_size;
+                points_last_layer = points_this_layer / 2;
+                // first build the tree
+                for (int j = 0; j < points_last_layer; j++) {
+                    if (j == skip_index) {
+                        continue;
+                    }
+                    prg.reseed(&batch_GGM_leaves[k * length + j * step_size_last_layer]);
+                    prg.random_block(temp_data, 2);
+                    batch_GGM_leaves[k * length + j * step_size_last_layer] = temp_data[0];
+                    batch_GGM_leaves[k * length + j * step_size_last_layer + step_size] = temp_data[1];
+                }
+
+                // std::cout << std::endl;
+                // for (int ii = 0; ii < leaves_size; ii++) {
+                //     print_block(batch_GGM_leaves[ii]);
+                // }
+                // std::cout << std::endl;
+
+                block128 temp = layer_OT_sum_seed[k * tree_depth + i - 1];
+                for (int j = 0; j < points_this_layer; j += 2) {
+                    temp = _mm_xor_si128(
+                        temp, batch_GGM_leaves[k * length + (j + r[k * tree_depth + i - 1]) * step_size]);
+                }
+                batch_GGM_leaves[k * length + skip_index * step_size_last_layer + step_size * r[k * tree_depth + i - 1]]
+                        = temp;
+                skip_index = (skip_index << 1) + (r[k * tree_depth + i - 1] ^ 1);
+
+                // std::cout << std::endl;
+                // for (int ii = 0; ii < leaves_size; ii++) {
+                //     print_block(batch_GGM_leaves[ii]);
+                // }
+                // std::cout << std::endl;
+            }
+        }
+
+        // #ifndef NDEBUG
+        // std::cout << std::endl;
+        // for (int i = 0; i < leaves_size; i++) {
+        //     print_block(batch_GGM_leaves[i]);
+        // }
+        // std::cout << std::endl;
+        // #endif
+        delete[] temp_data;
+        delete[] r;
+        delete[] layer_OT_sum_seed;
+    }
+    memcpy(seed, batch_GGM_leaves, length * 16 * sizeof(uint8_t));
+    delete[] batch_GGM_leaves;
+}
+
+
 void unpack_bits(const uint8_t *x_packed, uint8_t *x, int length) {
     for (int i = 0; i < length; ++i) {
         x[i] = (x_packed[i / 8] >> (i % 8)) & 1;
@@ -1033,14 +1187,14 @@ void pack_bits(const uint8_t *x, uint8_t *x_packed, int length) {
 // offset: the arithmetic share of the unit index
 // length: size of the array
 // uniShr: initialize the uniShr outside (for memory management) and all zeros with new T[length]()
-void AuxProtocols::uniShare_naive_bool(uint8_t *uniShr, int length, const uint64_t offset) {
+void AuxProtocols::uniShare_naive_bool(uint8_t *uniShr, int length, const uint64_t offset, uint8_t thread_used = 0) {
     auto *seeds = new block128[length]();
     PRG128 prg;
     auto *x = new uint8_t[length]();
     if (party == sci::ALICE) {
         // set the offset directly in the index
         x[offset] = 1;
-        nMinus1OUTNOT(seeds, length, 0);
+        nMinus1OUTNOT(seeds, length, 0, thread_used);
         // #ifndef NDEBUG
         //         std::cout << std::endl;
         //         for (int ii = 0; ii < length; ii++) {
@@ -1090,7 +1244,7 @@ void AuxProtocols::uniShare_naive_bool(uint8_t *uniShr, int length, const uint64
         delete[] a;
         delete[] b;
     } else {
-        nMinus1OUTNOT(seeds, length, offset);
+        nMinus1OUTNOT(seeds, length, offset, thread_used);
         // #ifndef NDEBUG
         //         std::cout << std::endl;
         //         for (int ii = 0; ii < length; ii++) {
@@ -1154,6 +1308,129 @@ void AuxProtocols::uniShare_naive_bool(uint8_t *uniShr, int length, const uint64
         for (int i = 0; i < length; i++) {
             uniShr[i] = c[i] ^ shift_xMa[i];
         }
+
+        for (int i = 0; i < length; i++) {
+            delete[] shift_translate[i];
+        }
+        delete[] shift_translate;
+        delete[] c;
+        delete[] xMa;
+        delete[] shift_xMa;
+    }
+    delete[] seeds;
+    delete[] x;
+}
+
+
+void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, int length, uint64_t *offset) {
+    auto *seeds = new block128[length * batch_size]();
+    PRG128 prg;
+    auto *x = new uint8_t[length * batch_size]();
+    if (party == sci::ALICE) {
+        // set the offset directly in the index
+        for (int i = 0; i < batch_size; i++) {
+            x[offset[i] + i * length] = 1;
+        }
+        nMinus1OUTNOT_batch(seeds, batch_size, length, nullptr);
+        // std::cout << std::endl;
+        // for (int ii = 0; ii < length; ii++) {
+        //     print_block(seeds[ii]);
+        // }
+        // std::cout << std::endl;
+
+        // generate the shift translation shares
+        auto **shift_translate = new uint8_t *[length * batch_size];
+        auto *a = new uint8_t[length * batch_size]();
+        auto *b = new uint8_t[length * batch_size]();
+        uint8_t *x_packed = new uint8_t[(length * batch_size + 7) / 8]();
+        for (int k = 0; k < batch_size; k++) {
+            for (int i = 0; i < length; i++) {
+                shift_translate[i + k * length] = new uint8_t[length]();
+                prg.reseed(&seeds[i + k * length]);
+                prg.random_bool((bool *) shift_translate[i + k * length], length);
+            }
+            for (int i = 0; i < length; i++) {
+                for (int j = 0; j < length; j++) {
+                    a[j + k * length] ^= shift_translate[i + k * length][j];
+                    b[i + k * length] ^= shift_translate[(i - j + length) % length + k * length][j];
+                }
+            }
+        }
+        memcpy(uniShr, b, batch_size * length * sizeof(uint8_t));
+        for (int i = 0; i < length * batch_size; i++) {
+            x[i] = x[i] ^ a[i];
+        }
+
+        pack_bits(x, x_packed, length * batch_size);
+        iopack->io->send_data(x_packed, ((length * batch_size + 7) / 8) * sizeof(uint8_t));
+
+        // std::cout << std::endl;
+        // for (int i = 0; i < length; i++) {
+        //     std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b[length + i]) << " ";
+        // }
+        // std::cout << std::endl;
+
+
+        for (int i = 0; i < length; i++) {
+            delete[] shift_translate[i];
+        }
+        delete[] shift_translate;
+        delete[] x_packed;
+        delete[] a;
+        delete[] b;
+    } else {
+        nMinus1OUTNOT_batch(seeds, batch_size, length, offset);
+        // #ifndef NDEBUG
+        // std::cout << std::endl;
+        // for (int ii = 0; ii < length; ii++) {
+        //     print_block(seeds[ii]);
+        // }
+        // std::cout << std::endl;
+        // #endif
+        // generate the shift translation shares
+        auto **shift_translate = new uint8_t *[length * batch_size]();
+        auto *c = new uint8_t[length * batch_size]();
+        for (int k = 0; k < batch_size; k++) {
+            for (int i = 0; i < length; i++) {
+                shift_translate[i + k * length] = new uint8_t[length]();
+                if (i == offset[k]) {
+                    continue;
+                }
+                prg.reseed(&seeds[i + k * length]);
+                prg.random_bool(reinterpret_cast<bool *>(shift_translate[i + k * length]), length);
+            }
+            for (int i = 0; i < length; i++) {
+                for (int j = 0; j < length; j++) {
+                    c[i + k * length] ^= shift_translate[(i - j + length) % length + k * length][j];
+                    c[(j + offset[k] + length) % length + k * length] ^= shift_translate[i + k * length][j];
+                }
+            }
+        }
+
+        auto *xMa = new uint8_t[length * batch_size]();
+        auto *shift_xMa = new uint8_t[length * batch_size]();
+        auto *xMa_packed = new uint8_t[(length * batch_size + 7) / 8];
+        iopack->io->recv_data(xMa_packed, ((length * batch_size + 7) / 8) * sizeof(uint8_t));
+        unpack_bits(xMa_packed, xMa, length * batch_size);
+        delete[] xMa_packed;
+
+        for (int k = 0; k < batch_size; k++) {
+            std::memcpy(k * length + shift_xMa, k * length + xMa + length - offset[k], offset[k]);
+            std::memcpy(k * length + shift_xMa + offset[k], k * length + xMa, length - offset[k]);
+        }
+        for (int k = 0; k < batch_size; k++) {
+            for (int i = 0; i < length; i++) {
+                uniShr[k * length + i] = c[k * length + i] ^ shift_xMa[k * length + i];
+            }
+        }
+
+
+        // std::cout << std::endl;
+        // std::cout << "the shifted vector" << std::endl;
+        // for (int i = 0; i < length; i++) {
+        //     std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(uniShr[length + i]) << " ";
+        // }
+        // std::cout << std::endl;
 
         for (int i = 0; i < length; i++) {
             delete[] shift_translate[i];

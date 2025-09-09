@@ -50,9 +50,10 @@ int main(int argc, char **argv) {
     auto start = clock_start();
     uint64_t comm = iopack->get_comm();
     if (eq == 1) {
-        frequency->count_eq(res, data, num_data, stand, num_stand, bw_data, bw_res);
+        frequency->count_eq_batch(res, data, num_data, stand, num_stand, bw_data, bw_res);
     } else {
-        frequency->count_shift(res, data, num_data, stand, num_stand, bw_data, bw_res);
+        // frequency->count_shift(res, data, num_data, stand, num_stand, bw_data, bw_res);
+        frequency->count_shift_batch(res, data, num_data, stand, num_stand, bw_data, bw_res);
     }
 
     comm = iopack->get_comm() - comm;
@@ -60,7 +61,7 @@ int main(int argc, char **argv) {
 
     cout << "Time\t" << t / (1000.0) << " ms" << endl;
     cout << "Bytes Sent\t" << comm << " bytes" << endl;
-
+    //
     // if (party == ALICE) {
     //     iopack->io->send_data(data, num_data * sizeof(uint64_t));
     //     iopack->io->send_data(res, num_stand * sizeof(uint64_t));
