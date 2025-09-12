@@ -64,7 +64,6 @@ int main(int argc, char **argv) {
         else {
             frequency->mode_CRT_eq(&res, data, num_data, stand, num_stand, bw_data, bw_res);
         }
-
     } else {
         frequency->mode_naive(&res, data, num_data, stand, num_stand, bw_data, bw_res, eq);
     }

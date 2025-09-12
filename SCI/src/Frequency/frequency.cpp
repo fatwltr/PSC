@@ -398,7 +398,7 @@ void Frequency::mode_CRT_eq(uint64_t *res, uint64_t *data, int num_data, uint64_
         for (int i = 0; i < num_fragments; i++) {
             int bw_data_t = ceil(log2(fragment_modulus[i] + 1));
             // the bw_res + 1 aims to locally transfer the share compare to two numbers for mill->compare()
-            // count_shift(res_t[i], data_fragments[i], num_data, stand, fragment_modulus[i], bw_data_t, bw_res + 1);
+            // count_shift_batch(res_t[i], data_fragments[i], num_data, stand, fragment_modulus[i], bw_data_t, bw_res + 1);
             count_eq_batch(res_t[i], data_fragments[i], num_data, stand, fragment_modulus[i], bw_data_t, bw_res + 1);
             // cout << "bw_res + 1: " << bw_res + 1 << endl;
             // for (int j = 0; j < fragment_modulus[i]; j++) {
@@ -449,6 +449,7 @@ void Frequency::mode_CRT_eq(uint64_t *res, uint64_t *data, int num_data, uint64_
         uint64_t N_trans;
         for (int i = 0; i < num_fragments; i++) {
             int bw_data_t = ceil(log2(fragment_modulus[i] + 1));
+            // count_shift_batch(res_t[i], data_fragments[i], num_data, stand, fragment_modulus[i], bw_data_t, bw_res + 1);
             count_eq_batch(res_t[i], data_fragments[i], num_data, stand, fragment_modulus[i], bw_data_t, bw_res + 1);
             // cout << "bw_res + 1: " << bw_res + 1 << endl;
             // for (int j = 0; j < fragment_modulus[i]; j++) {
@@ -498,16 +499,20 @@ void Frequency::mode_CRT_eq(uint64_t *res, uint64_t *data, int num_data, uint64_
     delete[] res_t;
 }
 
-
 void Frequency::mode_CRT_shift(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand,
-                               int32_t bw_data, int32_t bw_res) {
+                            int32_t bw_data, int32_t bw_res) {
     vector<uint64_t> fragment_modulus = findMinSumOverM(num_stand);
     uint64_t num_fragments = fragment_modulus.size();
     uint64_t prod = 1;
     for (int i = 0; i < num_fragments; i++) {
         prod = prod * fragment_modulus[i];
     }
-    uint64_t *res_count = new uint64_t[num_stand]();
+    // for (int i = 0; i < num_fragments; i++) {
+    //     cout << fragment_modulus[i] << " ";
+    // }
+    // cout << endl;
+    auto *t_ge_stand = new uint8_t[num_data];
+    auto *conversion_fragments = new uint64_t[num_data * num_fragments];
     auto **data_fragments = new uint64_t *[num_fragments];
     auto res_t = new uint64_t *[num_fragments];
     for (int i = 0; i < num_fragments; ++i) {
@@ -517,39 +522,105 @@ void Frequency::mode_CRT_shift(uint64_t *res, uint64_t *data, int num_data, uint
     auto *maxpool_oracle = new MaxPoolProtocol<uint64_t>(
         party, RING, iopack, bw_res + 1, 4, 0, otpack);
     auto *max_fragments = new uint64_t[num_fragments]();
-    count_shift_batch(res_count, data, num_data, stand, num_stand, bw_data, bw_res + 1);
     if (party == sci::ALICE) {
+        uint64_t *temp = new uint64_t[num_data];
+        for (int i = 0; i < num_data; ++i) {
+            temp[i] = num_stand - data[i];
+        }
+        aux->mill->compare(t_ge_stand, temp, num_data, bw_data);
+        aux->B2A_coprimes(t_ge_stand, conversion_fragments, num_data, fragment_modulus);
+        for (int i = 0; i < num_fragments; i++) {
+            for (int j = 0; j < num_data; j++) {
+                data_fragments[i][j] = (data[j] % fragment_modulus[i] +
+                                        (fragment_modulus[i] - num_stand % fragment_modulus[i]) * conversion_fragments
+                                        [j * num_fragments + i]) % fragment_modulus[i];
+            }
+        }
+        // for (int i = 0; i < num_fragments; i++) {
+        //     for (int j = 0; j < num_data; j++) {
+        //         cout << data_fragments[i][j] << ", ";
+        //     }
+        //     cout << endl;
+        // }
         uint64_t tt;
         uint8_t t_ge;
         uint64_t N_trans;
         for (int i = 0; i < num_fragments; i++) {
             int bw_data_t = ceil(log2(fragment_modulus[i] + 1));
-            for (int j = 0; j < num_stand; j++) {
-                res_t[i][j % fragment_modulus[i]] += res_count[j];
-                res_t[i][j % fragment_modulus[i]] &= (1ULL << (bw_res + 1)) - 1;
-            }
+            // the bw_res + 1 aims to locally transfer the share compare to two numbers for mill->compare()
+            count_shift_batch(res_t[i], data_fragments[i], num_data, stand, fragment_modulus[i], bw_data_t, bw_res + 1);
+            // cout << "bw_res + 1: " << bw_res + 1 << endl;
+            // for (int j = 0; j < fragment_modulus[i]; j++) {
+            //     cout << res_t[i][j] << ", ";
+            // }
+            // cout << endl;
             maxpool_oracle->funcMaxMPC_spcial(fragment_modulus[i], res_t[i], &tt, &max_fragments[i], bw_data_t);
+            // cout << max_fragments[i] << ", ";
+            // convert the share to mod $prod$
             tt = (1 << bw_data_t) - max_fragments[i];
             aux->mill->compare(&t_ge, &tt, 1, bw_data_t);
             t_ge ^= 1;
             aux->B2A_coprimes(&t_ge, &N_trans, 1, vector<uint64_t>{prod});
+            // cout << "N_trans: " << N_trans << ", ";
             max_fragments[i] = ((max_fragments[i] + prod - (1 << bw_data_t) * N_trans % prod)) % prod;
+            // cout << max_fragments[i] << endl;
         }
+        // cout << endl;
+        // for (int i = 0; i < num_fragments * num_data; i += num_fragments) {
+        //     for (int j = 0; j < num_fragments; j++) {
+        //         cout << conversion_fragments[i + j] << ", ";
+        //     }
+        //     cout << endl;
+        // }
+        //
+        delete[] temp;
     } else {
+        aux->mill->compare(t_ge_stand, data, num_data, bw_data);
+        for (int i = 0; i < num_data; i++) {
+            t_ge_stand[i] = t_ge_stand[i] ^ 1;
+        }
+        aux->B2A_coprimes(t_ge_stand, conversion_fragments, num_data, fragment_modulus);
+        for (int i = 0; i < num_fragments; i++) {
+            for (int j = 0; j < num_data; j++) {
+                data_fragments[i][j] = (data[j] % fragment_modulus[i] +
+                                        (fragment_modulus[i] - num_stand % fragment_modulus[i]) * conversion_fragments
+                                        [j * num_fragments + i]) % fragment_modulus[i];
+            }
+        }
+        // for (int i = 0; i < num_fragments; i++) {
+        //     for (int j = 0; j < num_data; j++) {
+        //         cout << data_fragments[i][j] << ", ";
+        //     }
+        //     cout << endl;
+        // }
         uint64_t tt;
         uint8_t t_ge;
         uint64_t N_trans;
         for (int i = 0; i < num_fragments; i++) {
             int bw_data_t = ceil(log2(fragment_modulus[i] + 1));
-            for (int j = 0; j < num_stand; j++) {
-                res_t[i][j % fragment_modulus[i]] += res_count[j];
-                res_t[i][j % fragment_modulus[i]] &= (1ULL << (bw_res + 1)) - 1;
-            }
+            count_shift_batch(res_t[i], data_fragments[i], num_data, stand, fragment_modulus[i], bw_data_t, bw_res + 1);
+            // cout << "bw_res + 1: " << bw_res + 1 << endl;
+            // for (int j = 0; j < fragment_modulus[i]; j++) {
+            //     cout << res_t[i][j] << ", ";
+            // }
+            // cout << endl;
             maxpool_oracle->funcMaxMPC_spcial(fragment_modulus[i], res_t[i], &tt, &max_fragments[i], bw_data_t);
+            // cout << max_fragments[i] << ", ";
+            // convert to mod $prod$
             aux->mill->compare(&t_ge, &max_fragments[i], 1, bw_data_t);
             aux->B2A_coprimes(&t_ge, &N_trans, 1, vector<uint64_t>{prod});
+            // cout << "N_trans: " << N_trans << ", ";
             max_fragments[i] = ((max_fragments[i] + prod - (1 << bw_data_t) * N_trans % prod)) % prod;
+            // cout << max_fragments[i] << endl;
         }
+        // cout << endl;
+
+        // for (int i = 0; i < num_fragments * num_data; i += num_fragments) {
+        //     for (int j = 0; j < num_fragments; j++) {
+        //         cout << conversion_fragments[i + j] << ", ";
+        //     }
+        //     cout << endl;
+        // }
     }
 
     uint64_t Mi = 1;
@@ -559,11 +630,13 @@ void Frequency::mode_CRT_shift(uint64_t *res, uint64_t *data, int num_data, uint
     for (int i = 0; i < num_fragments; i++) {
         Mi = prod / fragment_modulus[i];
         yi = mod_inverse(Mi, fragment_modulus[i]);
+        // cout << endl << "yi: " << yi << " Mi: " << Mi << endl;
         res[0] += (max_fragments[i] * Mi * yi) % prod;
         res[0] %= prod;
     }
 
-    delete[] res_count;
+    delete[] t_ge_stand;
+    delete[] conversion_fragments;
     delete maxpool_oracle;
     for (int i = 0; i < num_fragments; i++) {
         delete[] data_fragments[i];
@@ -573,3 +646,79 @@ void Frequency::mode_CRT_shift(uint64_t *res, uint64_t *data, int num_data, uint
     delete[] data_fragments;
     delete[] res_t;
 }
+
+
+// void Frequency::mode_CRT_shift(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand,
+//                                int32_t bw_data, int32_t bw_res) {
+//     vector<uint64_t> fragment_modulus = findMinSumOverM(num_stand);
+//     uint64_t num_fragments = fragment_modulus.size();
+//     uint64_t prod = 1;
+//     for (int i = 0; i < num_fragments; i++) {
+//         prod = prod * fragment_modulus[i];
+//     }
+//     uint64_t *res_count = new uint64_t[num_stand]();
+//     auto **data_fragments = new uint64_t *[num_fragments];
+//     auto res_t = new uint64_t *[num_fragments];
+//     for (int i = 0; i < num_fragments; ++i) {
+//         data_fragments[i] = new uint64_t[num_data];
+//         res_t[i] = new uint64_t[fragment_modulus[i]]();
+//     }
+//     auto *maxpool_oracle = new MaxPoolProtocol<uint64_t>(
+//         party, RING, iopack, bw_res + 1, 4, 0, otpack);
+//     auto *max_fragments = new uint64_t[num_fragments]();
+//     count_shift_batch(res_count, data, num_data, stand, num_stand, bw_data, bw_res + 1);
+//     if (party == sci::ALICE) {
+//         uint64_t tt;
+//         uint8_t t_ge;
+//         uint64_t N_trans;
+//         for (int i = 0; i < num_fragments; i++) {
+//             int bw_data_t = ceil(log2(fragment_modulus[i] + 1));
+//             for (int j = 0; j < num_stand; j++) {
+//                 res_t[i][j % fragment_modulus[i]] += res_count[j];
+//                 res_t[i][j % fragment_modulus[i]] &= (1ULL << (bw_res + 1)) - 1;
+//             }
+//             maxpool_oracle->funcMaxMPC_spcial(fragment_modulus[i], res_t[i], &tt, &max_fragments[i], bw_data_t);
+//             tt = (1 << bw_data_t) - max_fragments[i];
+//             aux->mill->compare(&t_ge, &tt, 1, bw_data_t);
+//             t_ge ^= 1;
+//             aux->B2A_coprimes(&t_ge, &N_trans, 1, vector<uint64_t>{prod});
+//             max_fragments[i] = ((max_fragments[i] + prod - (1 << bw_data_t) * N_trans % prod)) % prod;
+//         }
+//     } else {
+//         uint64_t tt;
+//         uint8_t t_ge;
+//         uint64_t N_trans;
+//         for (int i = 0; i < num_fragments; i++) {
+//             int bw_data_t = ceil(log2(fragment_modulus[i] + 1));
+//             for (int j = 0; j < num_stand; j++) {
+//                 res_t[i][j % fragment_modulus[i]] += res_count[j];
+//                 res_t[i][j % fragment_modulus[i]] &= (1ULL << (bw_res + 1)) - 1;
+//             }
+//             maxpool_oracle->funcMaxMPC_spcial(fragment_modulus[i], res_t[i], &tt, &max_fragments[i], bw_data_t);
+//             aux->mill->compare(&t_ge, &max_fragments[i], 1, bw_data_t);
+//             aux->B2A_coprimes(&t_ge, &N_trans, 1, vector<uint64_t>{prod});
+//             max_fragments[i] = ((max_fragments[i] + prod - (1 << bw_data_t) * N_trans % prod)) % prod;
+//         }
+//     }
+//
+//     uint64_t Mi = 1;
+//     uint64_t yi = 1;
+//     cout << endl << "prod: " << prod << endl;
+//     res[0] = 0;
+//     for (int i = 0; i < num_fragments; i++) {
+//         Mi = prod / fragment_modulus[i];
+//         yi = mod_inverse(Mi, fragment_modulus[i]);
+//         res[0] += (max_fragments[i] * Mi * yi) % prod;
+//         res[0] %= prod;
+//     }
+//
+//     delete[] res_count;
+//     delete maxpool_oracle;
+//     for (int i = 0; i < num_fragments; i++) {
+//         delete[] data_fragments[i];
+//         delete[] res_t[i];
+//     }
+//     delete[] max_fragments;
+//     delete[] data_fragments;
+//     delete[] res_t;
+// }

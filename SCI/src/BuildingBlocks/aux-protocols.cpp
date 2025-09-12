@@ -21,6 +21,7 @@ SOFTWARE.
 
 #include "BuildingBlocks/aux-protocols.h"
 
+#include <csignal>
 #include <iomanip>
 
 #include "BuildingBlocks/truncation.h"
@@ -653,6 +654,13 @@ void AuxProtocols::msnzb_one_hot(uint64_t *x, uint8_t *one_hot_vector,
 
     this->msnzb_sci(x, msnzb_index, bw_x, size, digit_size);
 
+    // cout << endl;
+    // cout << "msnzb_index " << endl;
+    // for (int i = 0; i < size; i++) {
+    //     cout << msnzb_index[i] << " ";
+    // }
+    // cout << endl;
+
     // use LUT to get the one-hot representation
     int D = 1 << msnzb_index_bits;
     uint64_t *xor_mask = new uint64_t[size];
@@ -1027,7 +1035,7 @@ void AuxProtocols::nMinus1OUTNOT(block128 *seed, uint64_t length, uint64_t offse
 void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint64_t length, uint64_t *offset) {
     const int tree_depth = static_cast<int>(std::ceil(std::log2(length)));
     const int leaves_size = static_cast<int>(std::pow(2, tree_depth));
-    auto *batch_GGM_leaves = new block128[batch_size * length]();
+    auto *batch_GGM_leaves = new block128[batch_size * leaves_size]();
     PRG128 prg;
     if (party == sci::ALICE) {
         block128 *my_seed = new block128[batch_size];
@@ -1077,10 +1085,8 @@ void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint
             // }
             // std::cout << std::endl;
         }
-
         delete[] temp_data;
         otpack->iknp_straight->send(layer_OT_sum_seed[0], layer_OT_sum_seed[1], (tree_depth * batch_size));
-
         // #ifndef NDEBUG
         // std::cout << std::endl;
         // for (int i = 0; i < leaves_size; i++) {
@@ -1093,7 +1099,7 @@ void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint
         }
         delete[] layer_OT_sum_seed;
     } else {
-        auto r = new bool[tree_depth * batch_size];
+        auto *r = new bool[tree_depth * batch_size];
         auto *layer_OT_sum_seed = new block128[tree_depth * batch_size];
         for (int i = 1; i <= tree_depth; i++) {
             for (int k = 0; k < batch_size; k++) {
@@ -1154,7 +1160,6 @@ void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint
                 // std::cout << std::endl;
             }
         }
-
         // #ifndef NDEBUG
         // std::cout << std::endl;
         // for (int i = 0; i < leaves_size; i++) {
@@ -1166,7 +1171,7 @@ void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint
         delete[] r;
         delete[] layer_OT_sum_seed;
     }
-    memcpy(seed, batch_GGM_leaves, length * 16 * sizeof(uint8_t));
+    memcpy(seed, batch_GGM_leaves, batch_size * length * 16 * sizeof(uint8_t));
     delete[] batch_GGM_leaves;
 }
 
@@ -1370,8 +1375,7 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
         // }
         // std::cout << std::endl;
 
-
-        for (int i = 0; i < length; i++) {
+        for (int i = 0; i < length * batch_size; i++) {
             delete[] shift_translate[i];
         }
         delete[] shift_translate;
@@ -1432,7 +1436,7 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
         // }
         // std::cout << std::endl;
 
-        for (int i = 0; i < length; i++) {
+        for (int i = 0; i < length * batch_size; i++) {
             delete[] shift_translate[i];
         }
         delete[] shift_translate;
@@ -1509,4 +1513,260 @@ void AuxProtocols::multiplexer_two_plain(uint8_t *sel, uint64_t x, uint64_t *y,
 
     delete[] corr_data;
     delete[] data;
+}
+
+void AuxProtocols::msnzb_sci_tree(uint64_t *x, uint64_t *msnzb_index, int32_t bw_x,
+                                  int32_t size, int32_t digit_size) {
+    // The protocol only works when num_digits = ceil((bw_x * 1.0) / digit_size) is a power of 2.
+    int32_t last_digit_size = bw_x % digit_size;
+    uint64_t mask_x = (bw_x == 64 ? -1 : ((1ULL << bw_x) - 1));
+    uint64_t digit_mask = (digit_size == 64 ? -1 : ((1ULL << digit_size) - 1));
+    uint64_t last_digit_mask =
+            (last_digit_size == 64 ? -1 : ((1ULL << last_digit_size) - 1));
+    if (last_digit_size == 0) {
+        last_digit_mask = digit_mask;
+        last_digit_size = digit_size;
+    }
+    int32_t num_digits = ceil((bw_x * 1.0) / digit_size);
+    int32_t depth = (int32_t) log2(num_digits);
+    uint64_t *x_digits = new uint64_t[size];
+    uint64_t *temp = new uint64_t[size];
+    uint64_t *temp1 = new uint64_t[size];
+    uint64_t *temp2 = new uint64_t[size];
+    uint8_t **branch_choices = new uint8_t *[size];
+    for (int i = 0; i < size; i++) {
+        branch_choices[i] = new uint8_t[size];
+    }
+
+    XTProtocol *xt = new XTProtocol(this->party, this->iopack, this->otpack);
+
+    // use the tree to search out the digits, and record the branches
+    Truncation trunc(this->party, this->iopack, this->otpack);
+    Equality eq(this->party, this->iopack, this->otpack);
+
+    trunc.truncate_and_reduce(size, x, temp, bw_x / 2, bw_x);
+    if (this->party == sci::ALICE) {
+        for (int i = 0; i < size; i++) {
+            temp2[i] = (1ULL << (bw_x / 2)) - temp[i];
+            temp2[i] &= (1ULL << (bw_x / 2)) - 1;
+        }
+        eq.check_equality(branch_choices[0], temp2, size, bw_x / 2);
+        for (int i = 0; i < size; i++) {
+            temp2[i] = x[i] - temp[i];
+            temp2[i] &= (1ULL << (bw_x / 2)) - 1;
+        }
+        multiplexer(branch_choices[0], temp2, temp1, size, bw_x / 2, bw_x / 2);
+        for (int i = 0; i < size; i++) {
+            temp[i] = temp1[i] + temp[i];
+            temp[i] &= (1ULL << (bw_x / 2)) - 1;
+        }
+    } else {
+        eq.check_equality(branch_choices[0], temp, size, bw_x / 2);
+        for (int i = 0; i < size; i++) {
+            temp2[i] = x[i] - temp[i];
+            temp2[i] &= (1ULL << (bw_x / 2)) - 1;
+        }
+        multiplexer(branch_choices[0], temp2, temp1, size, bw_x / 2, bw_x / 2);
+        for (int i = 0; i < size; i++) {
+            temp[i] = temp1[i] + temp[i];
+            temp[i] &= (1ULL << (bw_x / 2)) - 1;
+        }
+    }
+
+    int bw_temp = bw_x / 2;
+    for (int i = 1; i < depth; i++) {
+        trunc.truncate_and_reduce(size, temp, temp1, bw_temp / 2, bw_temp);
+        if (this->party == sci::ALICE) {
+            for (int j = 0; j < size; j++) {
+                temp2[j] = (1ULL << (bw_temp / 2)) - temp1[j];
+                temp2[j] &= (1ULL << (bw_temp / 2)) - 1;
+            }
+            eq.check_equality(branch_choices[i], temp2, size, bw_temp / 2);
+            for (int j = 0; j < size; j++) {
+                temp2[j] = temp[j] - temp1[j];
+                temp2[j] &= (1ULL << (bw_temp / 2)) - 1;
+            }
+            multiplexer(branch_choices[i], temp2, temp, size, bw_temp / 2, bw_temp / 2);
+            for (int j = 0; j < size; j++) {
+                temp[j] = temp[j] + temp1[j];
+                temp[j] &= (1ULL << (bw_temp / 2)) - 1;
+            }
+        } else {
+            eq.check_equality(branch_choices[i], temp1, size, bw_temp / 2);
+            for (int j = 0; j < size; j++) {
+                temp2[j] = temp[j] - temp1[j];
+                temp2[j] &= (1ULL << (bw_temp / 2)) - 1;
+            }
+            multiplexer(branch_choices[i], temp2, temp, size, bw_temp / 2, bw_temp / 2);
+            for (int j = 0; j < size; j++) {
+                temp[j] = temp[j] + temp1[j];
+                temp[j] &= (1ULL << (bw_temp / 2)) - 1;
+            }
+        }
+        bw_temp /= 2;
+    }
+
+    // in here provide the partial digits.
+    // Use LUTs for MSNZB on digits
+
+    int D = (1 << digit_size);
+    int DLast = (1 << last_digit_size);
+    uint8_t *z_ = new uint8_t[size];
+    uint64_t *msnzb_ = new uint64_t[size];
+    uint64_t *msnzb_extended = new uint64_t[size];
+    int lookup_output_bits = (ceil(log2(digit_size))) + 1;
+    int mux_bits = ceil(log2(bw_x));
+    uint64_t msnzb_mask = (1ULL << (lookup_output_bits - 1)) - 1;
+    uint64_t mux_mask = (1ULL << mux_bits) - 1;
+    if (party == ALICE) {
+        uint64_t **spec;
+        spec = new uint64_t *[size];
+        PRG128 prg;
+        prg.random_data(z_, size * sizeof(uint8_t));
+        prg.random_data(msnzb_, size * sizeof(uint64_t));
+        for (int i = 0; i < size; i++) {
+            spec[i] = new uint64_t[D];
+            z_[i] &= 1;
+            msnzb_[i] &= msnzb_mask;
+            for (int j = 0; j < D; j++) {
+                // int idx = (x_digits[i] + j) & digit_mask;
+                int idx = (temp[i] + j) & digit_mask;
+                uint64_t lookup_val = lookup_msnzb(idx);
+                spec[i][j] = ((lookup_val >> 1) - msnzb_[i]) & msnzb_mask;
+                spec[i][j] <<= 1;
+                spec[i][j] |=
+                        ((uint64_t) (((uint8_t) (lookup_val & 1ULL)) ^ z_[i]) & 1ULL);
+            }
+        }
+        this->lookup_table<uint64_t>(spec, nullptr, nullptr, size,
+                                     digit_size, lookup_output_bits);
+
+        // Zero extend to mux_bits
+        xt->z_extend(size, msnzb_, msnzb_index,
+                     lookup_output_bits - 1, mux_bits);
+
+        for (int i = 0; i < size; i++) {
+            delete[] spec[i];
+        }
+        delete[] spec;
+    } else {
+        // BOB
+        this->lookup_table<uint64_t>(nullptr, temp, msnzb_, size,
+                                     digit_size, lookup_output_bits);
+        // this->lookup_table<uint64_t>(nullptr, x_digits, msnzb_, size,
+        // digit_size, lookup_output_bits);
+        for (int i = 0; i < size; i++) {
+            z_[i] = (uint8_t) (msnzb_[i] & 1ULL);
+            msnzb_[i] >>= 1;
+        }
+        // Zero extend to mux_bits
+        xt->z_extend(size, msnzb_, msnzb_index,
+                     lookup_output_bits - 1, mux_bits);
+
+        for (int j = 0; j < size; j++) {
+            msnzb_index[j] &= mux_mask;
+        }
+
+    }
+
+    // Combine MSNZB of digits
+    int t = bw_x;
+    for (int i = 0; i < depth; i++) {
+        t /= 2;
+        if (party == ALICE) {
+            for (int j = 0; j < size; j++) {
+                branch_choices[i][j] ^= 1;
+            }
+        }
+        multiplexer_two_plain(branch_choices[i], t, temp, size, mux_bits, mux_bits);
+        for (int j = 0; j < size; j++) {
+            msnzb_index[j] += temp[j];
+            msnzb_index[j] &= mux_mask;
+        }
+    }
+
+    delete xt;
+    delete[] x_digits;
+    delete[] z_;
+    delete[] temp;
+    delete[] temp1;
+    delete[] temp2;
+    delete[] msnzb_;
+    delete[] msnzb_extended;
+    for (int i = 0; i < size; i++) {
+        delete[] branch_choices[i];
+    }
+    delete[] branch_choices;
+    return;
+}
+
+
+void AuxProtocols::msnzb_one_hot_tree(uint64_t *x, uint8_t *one_hot_vector,
+                                      int32_t bw_x, int32_t size,
+                                      int32_t digit_size) {
+    uint64_t mask_x = (bw_x == 64 ? -1 : ((1ULL << bw_x) - 1));
+    int msnzb_index_bits = ceil(log2(bw_x));
+    uint64_t msnzb_index_mask = (1ULL << msnzb_index_bits) - 1;
+
+    uint64_t *msnzb_index = new uint64_t[size];
+
+    // return the msnzb_index of x
+    this->msnzb_sci_tree(x, msnzb_index, bw_x, size, digit_size);
+
+    // cout << endl;
+    // cout <<  "msnzb_index " << endl;
+    // for (int i = 0; i < size; i++) {
+    //     cout << msnzb_index[i] << " ";
+    // }
+    // cout << endl;
+
+    // use LUT to get the one-hot representation
+    int D = 1 << msnzb_index_bits;
+    uint64_t *xor_mask = new uint64_t[size];
+    if (party == ALICE) {
+        uint64_t **spec;
+        spec = new uint64_t *[size];
+        PRG128 prg;
+        prg.random_data(one_hot_vector, size * bw_x * sizeof(uint8_t));
+        for (int i = 0; i < size; i++) {
+            for (int j = 0; j < bw_x; j++) {
+                one_hot_vector[i * bw_x + j] &= 1;
+            }
+            xor_mask[i] = 0ULL;
+            for (int j = (bw_x - 1); j >= 0; j--) {
+                xor_mask[i] <<= 1;
+                xor_mask[i] ^= (uint64_t) one_hot_vector[i * bw_x + j];
+            }
+        }
+        for (int i = 0; i < size; i++) {
+            spec[i] = new uint64_t[D];
+            for (int j = 0; j < D; j++) {
+                int idx = (msnzb_index[i] + j) & msnzb_index_mask;
+                uint64_t lookup_val = (1ULL << idx);
+                lookup_val ^= xor_mask[i];
+                spec[i][j] = lookup_val;
+            }
+        }
+        this->lookup_table<uint64_t>(spec, nullptr, nullptr, size, msnzb_index_bits,
+                                     bw_x);
+
+        for (int i = 0; i < size; i++) {
+            delete[] spec[i];
+        }
+        delete[] spec;
+    } else {
+        // BOB
+        uint64_t *temp = new uint64_t[size];
+        this->lookup_table<uint64_t>(nullptr, msnzb_index, temp, size,
+                                     msnzb_index_bits, bw_x);
+        for (int i = 0; i < size; i++) {
+            for (int j = 0; j < bw_x; j++) {
+                one_hot_vector[i * bw_x + j] = (uint8_t) (temp[i] & 1ULL);
+                temp[i] >>= 1;
+            }
+        }
+        delete[] temp;
+    }
+    delete[] xor_mask;
+    delete[] msnzb_index;
 }

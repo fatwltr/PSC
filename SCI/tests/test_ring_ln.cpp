@@ -118,7 +118,7 @@ int main(int argc, char **argv) {
 
         double log_min = std::log2(0.0001);
         double log_max = std::log2(10000);
-        double step = (log_max - log_min) / (100 - 1);
+        double step = (log_max - log_min) / (dim - 1);
 
         for (int i = 0; i < dim; i++) {
             x[i] = (uint64_t)(std::pow(2, log_min + i * step) * (1 << s_x));
@@ -199,7 +199,7 @@ int main(int argc, char **argv) {
         delete[] y0;
     }
 
-    cout << "Number of sqrt/s:\t" << (double(dim) / t) * 1e6 << std::endl;
+    cout << "Number of ln/s:\t" << (double(dim) / t) * 1e6 << std::endl;
     cout << "ln Time\t" << t / (1000.0) << " ms" << endl;
     cout << "ln Bytes Sent\t" << total_comm << " bytes" << endl;
 

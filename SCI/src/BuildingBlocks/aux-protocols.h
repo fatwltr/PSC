@@ -170,7 +170,7 @@ public:
                        int32_t digit_size = 8);
 
     void msnzb_one_hot_index(uint64_t *x, uint8_t *one_hot_vector, uint64_t *msnzb_index,
-                                           int32_t bw_x, int32_t size, int32_t digit_size=8);
+                             int32_t bw_x, int32_t size, int32_t digit_size = 8);
 
     void msnzb_GC(uint64_t *x,
                   // size: bw_x * size
@@ -179,7 +179,7 @@ public:
 
     void nMinus1OUTNOT(sci::block128 *seeds, uint64_t length, uint64_t offset, uint8_t thread_used);
 
-    void nMinus1OUTNOT_batch(sci::block128 *seeds,uint64_t batch_size, uint64_t length, uint64_t* offset);
+    void nMinus1OUTNOT_batch(sci::block128 *seeds, uint64_t batch_size, uint64_t length, uint64_t *offset);
 
     // set the corresponding value at once -- naive
     void uniShare_naive_bool(uint8_t *uniShr, int length, uint64_t offset, uint8_t thread_used);
@@ -190,7 +190,14 @@ public:
                                int32_t size, int32_t bw_x, int32_t bw_y);
 
     void multiplexer_two_plain(uint8_t *sel, uint64_t x, uint64_t *y,
-                           int32_t size, int32_t bw_x, int32_t bw_y);
+                               int32_t size, int32_t bw_x, int32_t bw_y);
+
+    void msnzb_sci_tree(uint64_t *x, uint64_t *msnzb_index, int32_t bw_x,
+                        int32_t size, int32_t digit_size);
+
+    void msnzb_one_hot_tree(uint64_t *x, uint8_t *one_hot_vector,
+                            int32_t bw_x, int32_t size,
+                            int32_t digit_size);
 };
 
 #endif
