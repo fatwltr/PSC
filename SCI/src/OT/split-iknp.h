@@ -1178,6 +1178,82 @@ namespace sci {
             recv_pre(b, length);
             cot_recv_post(data, b, length);
         }
+
+        void cot_send_post_BShr(uint64_t *data0, uint64_t *corr, int length) {
+            uint64_t modulo_mask = (1ULL << this->l) - 1;
+            if (this->l == 64)
+                modulo_mask = -1;
+            const int bsize = AES_BATCH_SIZE / 2;
+            block128 pad[2 * bsize];
+            uint32_t y_size = (uint32_t) ceil((bsize * this->l) / (float(64)));
+            uint32_t corrected_y_size, corrected_bsize;
+            uint64_t y[y_size];
+            uint64_t corr_data[bsize];
+            for (int i = 0; i < length; i += bsize) {
+                for (int j = i; j < i + bsize and j < length; ++j) {
+                    pad[2 * (j - i)] = qT[j];
+                    pad[2 * (j - i) + 1] = xorBlocks(qT[j], block_s);
+                }
+                crh.H<2 * bsize>(pad, pad);
+                for (int j = i; j < i + bsize and j < length; ++j) {
+                    data0[j] = _mm_extract_epi64(pad[2 * (j - i)], 0) & modulo_mask;
+                    corr_data[j - i] =
+                            (corr[j] ^ data0[j] ^ _mm_extract_epi64(pad[2 * (j - i) + 1], 0)) &
+                            modulo_mask;
+                }
+                corrected_y_size =
+                        (uint32_t) ceil((std::min(bsize, length - i) * this->l) /
+                                        ((float) sizeof(uint64_t) * 8));
+                corrected_bsize = std::min(bsize, length - i);
+                pack_cot_messages(y, corr_data, corrected_y_size, corrected_bsize,
+                                  this->l);
+                io->send_data(y, sizeof(uint64_t) * (corrected_y_size));
+            }
+            delete[] qT;
+        }
+
+        void cot_recv_post_BShr(uint64_t *data, const bool *r, int length) {
+            uint64_t modulo_mask = (1ULL << this->l) - 1;
+            if (this->l == 64)
+                modulo_mask = -1;
+            const int bsize = AES_BATCH_SIZE;
+            uint32_t recvd_size = (uint32_t) ceil((bsize * this->l) / (float(64)));
+            uint32_t corrected_recvd_size, corrected_bsize;
+            uint64_t corr_data[bsize];
+            uint64_t recvd[recvd_size];
+
+            for (int i = 0; i < length; i += bsize) {
+                corrected_recvd_size =
+                        (uint32_t) ceil((std::min(bsize, length - i) * this->l) / (float(64)));
+                corrected_bsize = std::min(bsize, length - i);
+                io->recv_data(recvd, sizeof(uint64_t) * corrected_recvd_size);
+                if (bsize <= length - i)
+                    crh.H<bsize>(tT + i, tT + i);
+                else
+                    crh.Hn(tT + i, tT + i, length - i);
+                unpack_cot_messages(corr_data, recvd, corrected_bsize, this->l);
+                for (int j = i; j < i + bsize and j < length; ++j) {
+                    if (r[j])
+                        data[j] =
+                                (corr_data[j - i] ^ _mm_extract_epi64(tT[j], 0)) & modulo_mask;
+                    else
+                        data[j] = _mm_extract_epi64(tT[j], 0) & modulo_mask;
+                }
+            }
+            delete[] tT;
+        }
+
+        void send_cot_BShr(uint64_t *data0, uint64_t *corr, int length, int l) {
+            this->l = l;
+            send_pre(length);
+            cot_send_post_BShr(data0, corr, length);
+        }
+
+        void recv_cot_BShr(uint64_t *data, bool *b, int length, int l) {
+            this->l = l;
+            recv_pre(b, length);
+            cot_recv_post_BShr(data, b, length);
+        }
     };
 } // namespace sci
 #endif // SPLIT_OT_IKNP_H__

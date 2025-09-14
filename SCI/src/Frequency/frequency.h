@@ -53,6 +53,15 @@ public:
 
     void mode_CRT_shift(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand, int32_t bw_data,
                         int32_t bw_res);
+
+    void count_sort(uint64_t *res, uint64_t *frequency, int num_stand, int num_data,
+                           int32_t bw_data, int32_t bw_res);
+    void shuffle_sort(uint64_t *res, uint64_t *data, int num_stand, int num_data,
+                           int32_t bw_data, int32_t bw_res);
+
+    void pack_bits(uint8_t **x, uint8_t* x_packed, int rows, int cols);
+
+    void unpack_bits(uint8_t* x_packed, uint8_t **x, int rows, int cols) ;
 };
 
 #endif

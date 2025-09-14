@@ -1045,9 +1045,10 @@ void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint
         layer_OT_sum_seed[1] = new block128[tree_depth * batch_size];
         // build tree
         for (int i = 0; i < batch_size; i++) {
-            batch_GGM_leaves[i * length] = my_seed[i];
+            batch_GGM_leaves[i * leaves_size] = my_seed[i];
         }
         auto *temp_data = new block128[2];
+
         // parameters for layer0
         uint32_t points_this_layer = 1;
         uint32_t step_size = leaves_size / points_this_layer;
@@ -1061,22 +1062,22 @@ void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint
             for (int j = 0; j < points_last_layer; j++) {
                 // see through the nodes in each layer
                 for (int k = 0; k < batch_size; k++) {
-                    prg.reseed(&batch_GGM_leaves[k * length + j * step_size_last_layer]);
+                    prg.reseed(&batch_GGM_leaves[k * leaves_size + j * step_size_last_layer]);
                     prg.random_block(temp_data, 2);
-                    batch_GGM_leaves[k * length + j * step_size_last_layer] = temp_data[0];
-                    batch_GGM_leaves[k * length + j * step_size_last_layer + step_size] = temp_data[1];
+                    batch_GGM_leaves[k * leaves_size + j * step_size_last_layer] = temp_data[0];
+                    batch_GGM_leaves[k * leaves_size + j * step_size_last_layer + step_size] = temp_data[1];
                 }
             }
             for (int k = 0; k < batch_size; k++) {
-                layer_OT_sum_seed[0][k * tree_depth + i - 1] = batch_GGM_leaves[k * length + 0];
-                layer_OT_sum_seed[1][k * tree_depth + i - 1] = batch_GGM_leaves[k * length + step_size];
+                layer_OT_sum_seed[0][k * tree_depth + i - 1] = batch_GGM_leaves[k * leaves_size + 0];
+                layer_OT_sum_seed[1][k * tree_depth + i - 1] = batch_GGM_leaves[k * leaves_size + step_size];
                 for (int j = 2; j < points_this_layer; j += 2) {
                     layer_OT_sum_seed[0][k * tree_depth + i - 1] = _mm_xor_si128(
                         layer_OT_sum_seed[0][k * tree_depth + i - 1],
-                        batch_GGM_leaves[k * length + j * step_size]);
+                        batch_GGM_leaves[k * leaves_size + j * step_size]);
                     layer_OT_sum_seed[1][k * tree_depth + i - 1] = _mm_xor_si128(
                         layer_OT_sum_seed[1][k * tree_depth + i - 1],
-                        batch_GGM_leaves[k * length + (j + 1) * step_size]);
+                        batch_GGM_leaves[k * leaves_size + (j + 1) * step_size]);
                 }
             }
             // std::cout << std::endl;
@@ -1121,7 +1122,7 @@ void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint
             step_size_last_layer = 2 * step_size;
             points_last_layer = points_this_layer / 2;
             skip_index = r[0 + k * tree_depth] ^ 1;
-            batch_GGM_leaves[k * length + r[0 + k * tree_depth] * step_size] = layer_OT_sum_seed[0 + k * tree_depth];
+            batch_GGM_leaves[k * leaves_size + r[0 + k * tree_depth] * step_size] = layer_OT_sum_seed[0 + k * tree_depth];
             for (int i = 2; i <= tree_depth; i++) {
                 points_this_layer *= 2;
                 step_size = leaves_size / points_this_layer;
@@ -1132,10 +1133,10 @@ void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint
                     if (j == skip_index) {
                         continue;
                     }
-                    prg.reseed(&batch_GGM_leaves[k * length + j * step_size_last_layer]);
+                    prg.reseed(&batch_GGM_leaves[k * leaves_size + j * step_size_last_layer]);
                     prg.random_block(temp_data, 2);
-                    batch_GGM_leaves[k * length + j * step_size_last_layer] = temp_data[0];
-                    batch_GGM_leaves[k * length + j * step_size_last_layer + step_size] = temp_data[1];
+                    batch_GGM_leaves[k * leaves_size + j * step_size_last_layer] = temp_data[0];
+                    batch_GGM_leaves[k * leaves_size + j * step_size_last_layer + step_size] = temp_data[1];
                 }
 
                 // std::cout << std::endl;
@@ -1147,9 +1148,9 @@ void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint
                 block128 temp = layer_OT_sum_seed[k * tree_depth + i - 1];
                 for (int j = 0; j < points_this_layer; j += 2) {
                     temp = _mm_xor_si128(
-                        temp, batch_GGM_leaves[k * length + (j + r[k * tree_depth + i - 1]) * step_size]);
+                        temp, batch_GGM_leaves[k * leaves_size + (j + r[k * tree_depth + i - 1]) * step_size]);
                 }
-                batch_GGM_leaves[k * length + skip_index * step_size_last_layer + step_size * r[k * tree_depth + i - 1]]
+                batch_GGM_leaves[k * leaves_size + skip_index * step_size_last_layer + step_size * r[k * tree_depth + i - 1]]
                         = temp;
                 skip_index = (skip_index << 1) + (r[k * tree_depth + i - 1] ^ 1);
 
@@ -1171,23 +1172,38 @@ void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint
         delete[] r;
         delete[] layer_OT_sum_seed;
     }
-    memcpy(seed, batch_GGM_leaves, batch_size * length * 16 * sizeof(uint8_t));
+    for (int i = 0; i < batch_size; i++) {
+        memcpy(seed + i * length, batch_GGM_leaves + i * leaves_size, length * 16 * sizeof(uint8_t));
+    }
+    // memcpy(seed, batch_GGM_leaves, batch_size * length * 16 * sizeof(uint8_t));
     delete[] batch_GGM_leaves;
 }
 
 
-void unpack_bits(const uint8_t *x_packed, uint8_t *x, int length) {
+void AuxProtocols::unpack_bits(const uint8_t *x_packed, uint8_t *x, int length) {
     for (int i = 0; i < length; ++i) {
         x[i] = (x_packed[i / 8] >> (i % 8)) & 1;
     }
 }
 
-
-void pack_bits(const uint8_t *x, uint8_t *x_packed, int length) {
+void AuxProtocols::pack_bits(const uint8_t *x, uint8_t *x_packed, int length) {
     for (int i = 0; i < length; ++i) {
         x_packed[i / 8] |= (x[i] & 1) << (i % 8);
     }
 }
+
+void AuxProtocols::pack_bits(const uint8_t *x, uint64_t *x_packed, int length) {
+    for (int i = 0; i < length; ++i) {
+        x_packed[i / 64] |= (x[i] & 1) << (i % 64);
+    }
+}
+
+void AuxProtocols::unpack_bits(const uint64_t *x_packed, uint8_t *x, int length) {
+    for (int i = 0; i < length; ++i) {
+        x[i] = (x_packed[i / 64] >> (i % 64)) & 1;
+    }
+}
+
 
 // offset: the arithmetic share of the unit index
 // length: size of the array
@@ -1382,7 +1398,8 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
         delete[] x_packed;
         delete[] a;
         delete[] b;
-    } else {
+    }
+    else {
         nMinus1OUTNOT_batch(seeds, batch_size, length, offset);
         // #ifndef NDEBUG
         // std::cout << std::endl;
@@ -1513,6 +1530,71 @@ void AuxProtocols::multiplexer_two_plain(uint8_t *sel, uint64_t x, uint64_t *y,
 
     delete[] corr_data;
     delete[] data;
+}
+
+void AuxProtocols::multiplexer_bShr(uint8_t *sel, uint8_t **x, uint8_t **y, int32_t sel_size, int32_t length) {
+    int pack_len = (length + 63) / 64;
+    uint64_t *corr_data = new uint64_t[sel_size * pack_len];
+    uint64_t *x_packed = new uint64_t[sel_size * pack_len]();
+    uint64_t *data_S = new uint64_t[sel_size * pack_len];
+    uint64_t *data_R = new uint64_t[sel_size * pack_len];
+    uint8_t *sel_ext = new uint8_t[sel_size * pack_len];
+    for (int i = 0; i < sel_size; i++) {
+        for (int j = 0; j < pack_len; j++) {
+            sel_ext[i * pack_len + j] = sel[i];
+        }
+    }
+
+
+    // y = (sel_0 \xor sel_1) * (x_0 \xor x_1)
+    // y = (sel_0 \xor sel_1)*x_0 + (sel_0 \xor sel_1*x_1
+    // y = [sel_0*x_0 + sel_1*(x_0 - 2*sel_0*x_0)]
+    //     + [sel_1*x_1 + sel_0*(x_1 - 2*sel_1*x_1)]
+    for (int i = 0; i < sel_size; i++) {
+        pack_bits(x[i], &x_packed[i * pack_len], length);
+    }
+    for (int i = 0; i < sel_size * pack_len; i++) {
+        corr_data[i] = x_packed[i];
+    }
+
+#pragma omp parallel num_threads(2)
+    {
+        if (omp_get_thread_num() == 1) {
+            if (party == sci::ALICE) {
+                otpack->iknp_reversed->recv_cot_BShr(data_R, (bool *) sel_ext, sel_size * pack_len, 64);
+            } else {
+                // party == sci::BOB
+                otpack->iknp_reversed->send_cot_BShr(data_S, corr_data, sel_size * pack_len, 64);
+            }
+        } else {
+            if (party == sci::ALICE) {
+                otpack->iknp_straight->send_cot_BShr(data_S, corr_data, sel_size * pack_len, 64);
+            } else {
+                // party == sci::BOB
+                otpack->iknp_straight->recv_cot_BShr(data_R, (bool *) sel_ext, sel_size * pack_len, 64);
+            }
+        }
+    }
+
+    uint64_t *sel_mask = new uint64_t[sel_size * pack_len];
+    for (int i = 0; i < sel_size * pack_len; i++) {
+        sel_mask[i] = sel_ext[i] ? ~0ULL : 0ULL;
+    }
+
+    for (int i = 0; i < sel_size * pack_len; i++) {
+        corr_data[i] = (x_packed[i] & sel_mask[i]) ^ data_R[i] ^ data_S[i];
+    }
+
+    for (int i = 0; i < sel_size; i++) {
+        unpack_bits(&corr_data[i * pack_len], y[i], length);
+        // corr_data[i] = x[i];
+    }
+    delete[] corr_data;
+    delete[] data_S;
+    delete[] data_R;
+    delete[] sel_ext;
+    delete[] x_packed;
+    delete[] sel_mask;
 }
 
 void AuxProtocols::msnzb_sci_tree(uint64_t *x, uint64_t *msnzb_index, int32_t bw_x,
@@ -1666,7 +1748,6 @@ void AuxProtocols::msnzb_sci_tree(uint64_t *x, uint64_t *msnzb_index, int32_t bw
         for (int j = 0; j < size; j++) {
             msnzb_index[j] &= mux_mask;
         }
-
     }
 
     // Combine MSNZB of digits

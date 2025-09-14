@@ -192,6 +192,13 @@ public:
     void multiplexer_two_plain(uint8_t *sel, uint64_t x, uint64_t *y,
                                int32_t size, int32_t bw_x, int32_t bw_y);
 
+    void unpack_bits(const uint8_t *x_packed, uint8_t *x, int length);
+    void pack_bits(const uint8_t *x, uint8_t *x_packed, int length);
+    void unpack_bits(const uint64_t *x_packed, uint8_t *x, int length) ;
+    void pack_bits(const uint8_t *x, uint64_t *x_packed, int length) ;
+
+    void multiplexer_bShr(uint8_t *sel, uint8_t **x, uint8_t **y, int32_t sel_size, int32_t length);
+
     void msnzb_sci_tree(uint64_t *x, uint64_t *msnzb_index, int32_t bw_x,
                         int32_t size, int32_t digit_size);
 

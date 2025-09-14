@@ -113,6 +113,86 @@ void test_mux() {
     delete[] y;
 }
 
+void test_mux_bShr() {
+    PRG128 prg;
+
+    uint8_t *sel = new uint8_t[32];
+    uint8_t **x = new uint8_t *[32];
+    for (int i = 0; i < 32; i++) {
+        x[i] = new uint8_t[dim];
+        prg.random_data(x[i], dim * sizeof(uint8_t));
+        for (int j = 0; j < dim; j++) {
+            x[i][j] = x[i][j] & 1;
+        }
+    }
+    uint8_t **y = new uint8_t *[32];
+    for (int i = 0; i < 32; i++) {
+        y[i] = new uint8_t[dim];
+        prg.random_data(y[i], dim * sizeof(uint8_t));
+        for (int j = 0; j < dim; j++) {
+            y[i][j] = y[i][j] & 1;
+        }
+    }
+
+
+    prg.random_data(sel, 32 * sizeof(uint8_t));
+    for (int j = 0; j < 32; j++) {
+        sel[j] = sel[j] & 1;
+    }
+
+
+    aux->multiplexer_bShr(sel, x, y, 32, dim);
+
+    if (party == ALICE) {
+        iopack->io->send_data(sel, 32 * sizeof(uint8_t));
+        for (int i = 0; i < 32; i++) {
+            iopack->io->send_data(x[i], dim * sizeof(uint8_t));
+            iopack->io->send_data(y[i], dim * sizeof(uint8_t));
+        }
+    } else {
+        uint8_t *sel0 = new uint8_t[32];
+        uint8_t **x0 = new uint8_t *[32];
+        for (int i = 0; i < 32; i++) {
+            x0[i] = new uint8_t[dim];
+        }
+        uint8_t **y0 = new uint8_t *[32];
+        for (int i = 0; i < 32; i++) {
+            y0[i] = new uint8_t[dim];
+        }
+        iopack->io->recv_data(sel0, 32 * sizeof(uint8_t));
+        for (int i = 0; i < 32; i++) {
+            iopack->io->recv_data(x0[i], dim * sizeof(uint8_t));
+            iopack->io->recv_data(y0[i], dim * sizeof(uint8_t));
+        }
+        for (int i = 0; i < 32; i++) {
+            for (int j = 0; j < dim; j++) {
+                assert(((sel0[i] ^ sel[i]) & (x0[i][j] ^ x[i][j]) & 1) == ((y0[i][j] ^ y[i][j]) & 1));
+            }
+        }
+        cout << "MUX_shr Tests passed" << endl;
+
+        delete[] sel0;
+        for (int i = 0; i < 32; i++) {
+            delete[] x0[i];
+        }
+        delete[] x0;
+        for (int i = 0; i < 32; i++) {
+            delete[] y0[i];
+        }
+        delete[] y0;
+    }
+    delete[] sel;
+    for (int i = 0; i < 32; i++) {
+        delete[] x[i];
+    }
+    delete[] x;
+    for (int i = 0; i < 32; i++) {
+        delete[] y[i];
+    }
+    delete[] y;
+}
+
+
 void test_B2A() {
     int bw_y = 32;
     PRG128 prg;
@@ -429,8 +509,7 @@ void test_msnzb_one_hot() {
     uint64_t comm = iopack->get_comm();
     if (in_tree == 0) {
         aux->msnzb_one_hot(x, y, bw_x, dim, digit_size);
-    }
-    else {
+    } else {
         aux->msnzb_one_hot_tree(x, y, bw_x, dim, digit_size);
     }
 
@@ -491,13 +570,14 @@ int main(int argc, char **argv) {
     // test_MSB_computation();
     // test_wrap_computation();
     // test_mux();
+    test_mux_bShr();
     // test_B2A();
     // test_lookup_table<uint8_t>();
     // test_lookup_table<uint64_t>();
     // test_MSB_to_Wrap();
     // test_AND();
     // test_digit_decomposition();
-    test_msnzb_one_hot();
+    // test_msnzb_one_hot();
 
     return 0;
 }

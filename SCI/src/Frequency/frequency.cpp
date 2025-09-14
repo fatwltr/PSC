@@ -500,7 +500,7 @@ void Frequency::mode_CRT_eq(uint64_t *res, uint64_t *data, int num_data, uint64_
 }
 
 void Frequency::mode_CRT_shift(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand,
-                            int32_t bw_data, int32_t bw_res) {
+                               int32_t bw_data, int32_t bw_res) {
     vector<uint64_t> fragment_modulus = findMinSumOverM(num_stand);
     uint64_t num_fragments = fragment_modulus.size();
     uint64_t prod = 1;
@@ -722,3 +722,510 @@ void Frequency::mode_CRT_shift(uint64_t *res, uint64_t *data, int num_data, uint
 //     delete[] data_fragments;
 //     delete[] res_t;
 // }
+
+// num_data: the number of value range. num_samples: the number of the collected set.
+
+void Frequency::pack_bits(uint8_t **x, uint8_t *x_packed, int rows, int cols) {
+    int total_bits = rows * cols;
+    int packed_len = (total_bits + 7) / 8; // ceil division
+    std::fill(x_packed, x_packed + packed_len, 0); // clear output
+
+    int bit_index = 0;
+    for (int i = 0; i < rows; i++) {
+        for (int j = 0; j < cols; j++, bit_index++) {
+            if (x[i][j]) {
+                int byte_index = bit_index / 8;
+                int bit_offset = bit_index % 8;
+                x_packed[byte_index] |= (1 << bit_offset);
+            }
+        }
+    }
+}
+
+void Frequency::unpack_bits(uint8_t *x_packed, uint8_t **x, int rows, int cols) {
+    int total_bits = rows * cols;
+    int bit_index = 0;
+
+    for (int i = 0; i < rows; i++) {
+        for (int j = 0; j < cols; j++, bit_index++) {
+            int byte_index = bit_index / 8;
+            int bit_offset = bit_index % 8;
+            x[i][j] = (x_packed[byte_index] >> bit_offset) & 1;
+        }
+    }
+}
+
+void print_block_(const block128 &b) {
+    uint8_t bytes[16];
+    _mm_storeu_si128((__m128i *) bytes, b); // copy to byte array
+    for (int i = 0; i < 16; ++i)
+        std::cout << std::hex << std::setw(2) << std::setfill('0') << (int) bytes[i];
+    std::cout << std::endl;
+}
+
+void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, int num_data,
+                           int32_t bw_data, int32_t bw_res) {
+    uint64_t *endpoints = new uint64_t[num_stand]();
+    endpoints[0] = frequency[0];
+    for (int i = 1; i < num_stand; i++) {
+        endpoints[i] = endpoints[i - 1] + frequency[i];
+        endpoints[i] &= (1ULL << bw_res) - 1;
+    }
+
+    // cout << endl;
+    // for (int i = 0; i < num_stand; i++) {
+    //     cout << endpoints[i] << " ";
+    // }
+    // cout << endl;
+
+    // share conversion 2^bw_data -> num_data
+    uint8_t *t = new uint8_t[num_stand]();
+    uint64_t *appendix = new uint64_t[num_stand]();
+    this->aux->wrap_computation(endpoints, t, num_stand, bw_data);
+    this->aux->multiplexer_two_plain(t, (1ULL << bw_data) % num_data, appendix, num_stand, bw_data, bw_data);
+    for (int i = 0; i < num_stand; i++) {
+        endpoints[i] -= appendix[i];
+        endpoints[i] %= num_data;
+    }
+    // cout << num_data << " ";
+    // cout << endl;
+    // for (int i = 0; i < num_stand; i++) {
+    //     cout << endpoints[i] << " ";
+    // }
+    // cout << endl;
+
+    uint64_t mask_data = (bw_data == 64 ? -1 : ((1ULL << bw_data) - 1));
+    uint64_t mask_res = (bw_res == 64 ? -1 : ((1ULL << bw_res) - 1));
+    auto *seeds = new block128[num_stand * num_data * 2]();
+    auto *prg = new PRG128[num_stand * num_data * 2]();
+    auto **x = new uint8_t *[num_stand];
+    for (int i = 0; i < num_stand; i++) {
+        x[i] = new uint8_t[num_data * 2]();
+    }
+    auto **uniShr = new uint8_t *[num_stand];
+    for (int i = 0; i < num_stand; i++) {
+        uniShr[i] = new uint8_t[num_data * 2]();
+    }
+    auto **interval_indicate = new uint8_t *[num_stand];
+    for (int i = 0; i < num_stand; i++) {
+        interval_indicate[i] = new uint8_t[num_data]();
+    }
+    int save_memory = 8;
+    if (party == sci::ALICE) {
+        // set the offset directly in the index
+        for (int i = 0; i < num_stand; i++) {
+            std::fill(x[i], x[i] + endpoints[i], 1);
+            std::fill(x[i] + num_data + endpoints[i], x[i] + 2 * num_data, 1);
+        }
+
+        // do not need to generate a 2*num_data seed, we can set the second half seed directly as offset < num_data
+        this->aux->nMinus1OUTNOT_batch(seeds, num_stand, 2 * num_data, nullptr);
+        // generate the shift translation shares
+
+
+        // cout << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data * 2; j++) {
+        //         print_block_(seeds[i * num_data * 2 + j]);
+        //     }
+        // }
+        // cout << endl;
+
+        auto **shift_translate = new uint8_t *[num_data * 2];
+        for (int i = 0; i < num_data * 2; i++) {
+            shift_translate[i] = new uint8_t[save_memory]();
+        }
+        auto **a = new uint8_t *[num_stand];
+        for (int i = 0; i < num_stand; i++) {
+            a[i] = new uint8_t[num_data * 2]();
+        }
+        auto **b = new uint8_t *[num_stand];
+        for (int i = 0; i < num_stand; i++) {
+            b[i] = new uint8_t[num_data * 2]();
+        }
+
+        for (int i = 0; i < num_stand; i++) {
+            for (int j = 0; j < num_data * 2; j++) {
+                prg[i * num_data * 2 + j].reseed(&seeds[i * num_data * 2 + j]);
+            }
+        }
+
+        for (int i = 0; i < num_stand; i++) {
+            for (int k = 0; k < (num_data * 2 / save_memory); k++) {
+                for (int j = 0; j < num_data * 2; j++) {
+                    prg[i * num_data * 2 + j].random_bool((bool *) shift_translate[j], save_memory);
+                }
+
+                cout << "shift_translate" << endl;
+                for (int j = 0; j < num_data * 2; j++) {
+                    for (int l = 0; l < save_memory; l++) {
+                        cout << (int) shift_translate[j][l] << " ";
+                    }
+                    cout << endl;
+                }
+
+                for (int j = 0; j < num_data * 2; j++) {
+                    for (int l = 0; l < save_memory; l++) {
+                        a[i][l + k * save_memory] ^= shift_translate[j][l];
+                        b[i][j] ^= shift_translate[(j - l - k * save_memory + num_data * 2) % (num_data * 2)][l];
+                    }
+                }
+            }
+            int last = num_data * 2 % save_memory;
+            if (last == 0) {
+                continue;
+            }
+            int k = (num_data * 2 / save_memory);
+            for (int j = 0; j < num_data * 2; j++) {
+                prg[i * num_data * 2 + j].random_bool((bool *) shift_translate[j], last);
+            }
+            cout << "shift_translate" << endl;
+            for (int j = 0; j < num_data * 2; j++) {
+                for (int l = 0; l < last; l++) {
+                    cout << (int) shift_translate[j][l] << " ";
+                }
+                cout << endl;
+            }
+            for (int j = 0; j < num_data * 2; j++) {
+                for (int l = 0; l < last; l++) {
+                    a[i][l + k * save_memory] ^= shift_translate[j][l];
+                    b[i][j] ^= shift_translate[(j - l - k * save_memory + num_data * 2) % (num_data * 2)][l];
+                }
+            }
+        }
+
+        // cout << endl;
+        // cout << "----------x---------------" << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data * 2; j++) {
+        //         cout << (int) x[i][j] << ", ";
+        //     }
+        //     cout << endl;
+        // }
+
+        // cout << endl;
+        // cout << "----------a---------------" << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data * 2; j++) {
+        //         cout << (int) a[i][j] << ", ";
+        //     }
+        //     cout << endl;
+        // }
+
+
+        for (int i = 0; i < num_stand; i++) {
+            for (int j = 0; j < num_data * 2; j++) {
+                x[i][j] = x[i][j] ^ a[i][j];
+            }
+        }
+
+        // cout << endl;
+        // cout << "----------xMa---------------" << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data * 2; j++) {
+        //         cout << (int) x[i][j] << ", ";
+        //     }
+        //     cout << endl;
+        // }
+
+
+        // cout << endl;
+        // cout << "------------b-------------" << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data * 2; j++) {
+        //         cout << (int) b[i][j] << ", ";
+        //     }
+        //     cout << endl;
+        // }
+
+
+        uint8_t *x_packed = new uint8_t[(2 * num_data * num_stand + 7) / 8]();
+        pack_bits(x, x_packed, num_stand, 2 * num_data);
+        iopack->io->send_data(x_packed, ((2 * num_data * num_stand + 7) / 8) * sizeof(uint8_t));
+
+
+        // allocate the uniShr, and the
+        auto **mux_choice = new uint8_t *[num_stand];
+        for (int i = 0; i < num_stand; i++) {
+            mux_choice[i] = new uint8_t[num_data * 2]();
+            for (int j = 0; j < num_data; j++) {
+                mux_choice[i][j] = b[i][j] ^ b[i][j + num_data];
+            }
+        }
+        uint64_t *temp = new uint64_t[num_stand];
+        for (int i = 0; i < num_stand; i++) {
+            temp[i] = num_data - endpoints[i];
+        }
+        this->aux->mill->compare(t, temp, num_stand, bw_data);
+        // mux_choice padding a 0-string
+        this->aux->multiplexer_bShr(t, mux_choice, uniShr, num_stand, num_data * 2);
+        for (int i = 0; i < num_stand; i++) {
+            for (int j = 0; j < num_data; j++) {
+                uniShr[i][j] ^= b[i][j + num_data];
+                uniShr[i][j] ^= uniShr[i][j + num_data];
+            }
+        }
+        for (int i = 0; i < num_data * 2; i++) {
+            delete[] shift_translate[i];
+        }
+        delete[] shift_translate;
+        for (int i = 0; i < num_stand; i++) {
+            delete[] a[i];
+            delete[] b[i];
+            delete[] mux_choice[i];
+        }
+        delete[] x_packed;
+        delete[] mux_choice;
+        delete[] temp;
+        delete[] a;
+        delete[] b;
+    } else {
+        this->aux->nMinus1OUTNOT_batch(seeds, num_stand, 2 * num_data, endpoints);
+
+        // cout << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     cout << endpoints[i] << endl;
+        //     for (int j = 0; j < num_data * 2; j++) {
+        //         print_block_(seeds[i * num_data * 2 + j]);
+        //     }
+        // }
+        // cout << endl;
+
+        // generate the shift translation shares
+        auto **shift_translate = new uint8_t *[num_data * 2];
+        for (int i = 0; i < num_data * 2; i++) {
+            shift_translate[i] = new uint8_t[save_memory]();
+        }
+        auto **c = new uint8_t *[num_stand];
+        for (int i = 0; i < num_stand; i++) {
+            c[i] = new uint8_t[num_data * 2]();
+        }
+
+        for (int i = 0; i < num_stand; i++) {
+            for (int j = 0; j < num_data * 2; j++) {
+                prg[i * num_data * 2 + j].reseed(&seeds[i * num_data * 2 + j]);
+            }
+        }
+
+        for (int i = 0; i < num_stand; i++) {
+            for (int k = 0; k < (num_data * 2 / save_memory); k++) {
+                for (int j = 0; j < num_data * 2; j++) {
+                    prg[i * num_data * 2 + j].random_bool((bool *) shift_translate[j], save_memory);
+                }
+                // cout << "shift_translate" << endl;
+                // for (int j = 0; j < num_data * 2; j++) {
+                //     for (int l = 0; l < save_memory; l++) {
+                //         cout << (int) shift_translate[j][l] << " ";
+                //     }
+                //     cout << endl;
+                // }
+                for (int j = 0; j < num_data * 2; j++) {
+                    for (int l = 0; l < save_memory; l++) {
+                        c[i][j] ^= shift_translate[(j - l - k * save_memory + num_data * 2) % (num_data * 2)][l];
+                        c[i][(l + k * save_memory + endpoints[i] + 2 * num_data) % (2 * num_data)] ^= shift_translate[
+                            j][l];
+                    }
+                }
+            }
+            int last = num_data * 2 % save_memory;
+            if (last == 0) {
+                continue;
+            }
+            int k = (num_data * 2 / save_memory);
+            for (int j = 0; j < num_data * 2; j++) {
+                if (j == endpoints[i]) {
+                    std::fill(shift_translate[j], shift_translate[j] + save_memory, 0);
+                    continue;
+                }
+                prg[i * num_data * 2 + j].random_bool((bool *) shift_translate[j], last);
+            }
+            // cout << "shift_translate" << endl;
+            // for (int j = 0; j < num_data * 2; j++) {
+            //     for (int l = 0; l < last; l++) {
+            //         cout << (int) shift_translate[j][l] << " ";
+            //     }
+            //     cout << endl;
+            // }
+            for (int j = 0; j < num_data * 2; j++) {
+                for (int l = 0; l < last; l++) {
+                    c[i][j] ^= shift_translate[(j - l - k * save_memory + num_data * 2) % (num_data * 2)][l];
+                    c[i][(l + k * save_memory + endpoints[i] + 2 * num_data) % (2 * num_data)] ^= shift_translate[j][l];
+                }
+            }
+        }
+
+        // cout << endl;
+        // cout << "------------c-------------" << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data * 2; j++) {
+        //         cout << (int) c[i][j] << ", ";
+        //     }
+        //     cout << endl;
+        // }
+
+        auto **xMa = new uint8_t *[num_stand];
+        for (int i = 0; i < num_stand; i++) {
+            xMa[i] = new uint8_t[num_data * 2]();
+        }
+
+        auto **shift_xMa = new uint8_t *[num_stand];
+        for (int i = 0; i < num_stand; i++) {
+            shift_xMa[i] = new uint8_t[num_data * 2]();
+        }
+        auto *xMa_packed = new uint8_t[(2 * num_data * num_stand + 7) / 8];
+        iopack->io->recv_data(xMa_packed, ((2 * num_data * num_stand + 7) / 8) * sizeof(uint8_t));
+        unpack_bits(xMa_packed, xMa, num_stand, 2 * num_data);
+        delete[] xMa_packed;
+
+        // cout << endl;
+        // cout << "------------xMa-------------" << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data * 2; j++) {
+        //         cout << (int) xMa[i][j] << ", ";
+        //     }
+        //     cout << endl;
+        // }
+
+
+        for (int i = 0; i < num_stand; i++) {
+            std::memcpy(shift_xMa[i], xMa[i] + (2 * num_data - endpoints[i]), endpoints[i]);
+            std::memcpy(shift_xMa[i] + endpoints[i], xMa[i], 2 * num_data - endpoints[i]);
+        }
+
+        // cout << endl;
+        // cout << "------------shift_xMa-------------" << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data * 2; j++) {
+        //         cout << (int) shift_xMa[i][j] << ", ";
+        //     }
+        //     cout << endl;
+        // }
+
+        for (int i = 0; i < num_stand; i++) {
+            for (int j = 0; j < num_data * 2; j++) {
+                x[i][j] = c[i][j] ^ shift_xMa[i][j];
+            }
+        }
+
+
+        // cout << endl;
+        // cout << "---------c xor shift_xMa-----------" << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data * 2; j++) {
+        //         cout << (int) x[i][j] << ", ";
+        //     }
+        //     cout << endl;
+        // }
+
+
+        // seems choose the wrong side, and need some modification to solve the situation
+        uint8_t *first_half = new uint8_t[num_stand]();
+        auto **mux_choice = new uint8_t *[num_stand];
+        for (int i = 0; i < num_stand; i++) {
+            mux_choice[i] = new uint8_t[num_data * 2](); // *2 due to the shifted vector is shared
+            for (int j = num_data; j < 2 * num_data; j++) {
+                mux_choice[i][j] = x[i][j - num_data] ^ x[i][j];
+            }
+        }
+        this->aux->mill->compare(t, endpoints, num_stand, bw_data);
+        // mux_choice padding a 0-string
+        this->aux->multiplexer_bShr(first_half, mux_choice, uniShr, num_stand, num_data * 2);
+        for (int i = 0; i < num_stand; i++) {
+            for (int j = num_data; j < 2 * num_data; j++) {
+                uniShr[i][j] ^= x[i][j];
+                uniShr[i][j - num_data] ^= uniShr[i][j];
+            }
+        }
+        for (int i = 0; i < 2 * num_data; i++) {
+            delete[] shift_translate[i];
+        }
+        delete[] shift_translate;
+        for (int i = 0; i < num_stand; i++) {
+            delete[] c[i];
+            delete[] mux_choice[i];
+            delete[] xMa[i];
+            delete[] shift_xMa[i];
+        }
+        delete[] c;
+        delete[] xMa;
+        delete[] shift_xMa;
+        delete[] mux_choice;
+        delete[] first_half;
+    }
+
+    // for (int i = 0; i < num_stand; i++) {
+    //     cout << endl;
+    //     for (int j = 0; j < num_data; j++) {
+    //         cout << (int) uniShr[i][j] << ", ";
+    //     }
+    // }
+    // cout << endl;
+
+    // xor unishr
+    if (party == ALICE) {
+        for (int j = 0; j < num_data; j++) {
+            interval_indicate[0][j] = 1 ^ uniShr[0][j];
+        }
+    }
+    for (int i = 1; i < num_stand; i++) {
+        for (int j = 0; j < num_data; j++) {
+            interval_indicate[i][j] = uniShr[i][j] ^ uniShr[i - 1][j];
+        }
+    }
+    uint64_t *temp = new uint64_t[num_data]();
+    // MUX, can batch
+    for (int i = 0; i < num_stand; i++) {
+        aux->multiplexer_two_plain(interval_indicate[i], i, temp, num_data, bw_data, bw_data);
+        for (int j = 0; j < num_data; j++) {
+            res[j] += temp[j];
+        }
+    }
+
+    delete[] endpoints;
+    delete[] t;
+    delete[] appendix;
+    delete[] seeds;
+    delete[] prg;
+    for (int i = 0; i < num_stand; i++) {
+        delete[] x[i];
+        delete[] uniShr[i];
+        delete[] interval_indicate[i];
+    }
+    delete[] x;
+    delete[] uniShr;
+    delete[] interval_indicate;
+}
+
+void random_permutation(uint32_t *perm, int n) {
+    // initialize with 0, 1, 2, ..., n-1
+    for (int i = 0; i < n; ++i) {
+        perm[i] = i;
+    }
+
+    // random device + generator
+    std::random_device rd;
+    std::mt19937 gen(rd());
+
+    // Fisher–Yates shuffle
+    for (int i = n - 1; i > 0; --i) {
+        std::uniform_int_distribution<> dis(0, i);
+        int j = dis(gen);
+        std::swap(perm[i], perm[j]);
+    }
+}
+
+void Frequency::shuffle_sort(uint64_t *res, uint64_t *data, int num_stand, int num_data,
+                             int32_t bw_data, int32_t bw_res) {
+    // oblivious shuffle
+    // 1. element extend
+    // 2. opv
+    // 3. shuffle
+    uint32_t *perm = new uint32_t[num_data]();
+    random_permutation(perm, num_data);
+    for (int i = 0; i < num_data; i++) {
+        cout << perm[i] << " ";
+    }
+    cout << endl;
+
+    // quick sort
+}
