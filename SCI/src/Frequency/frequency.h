@@ -58,10 +58,19 @@ public:
                            int32_t bw_data, int32_t bw_res);
     void shuffle_sort(uint64_t *res, uint64_t *data, int num_stand, int num_data,
                            int32_t bw_data, int32_t bw_res);
+    int partition(uint64_t *arr, int low, int high, int bw);
+    void quickSort(uint64_t *arr, int low, int high, int bw);
+
+    void oblivious_shuffle(uint64_t *res, uint64_t *perm, uint64_t* data, int num_data, int32_t bw_data);
+    void oblivious_shuffle_reverse(uint64_t *res, uint64_t *perm, uint64_t* data, int num_data, int32_t bw_data);
 
     void pack_bits(uint8_t **x, uint8_t* x_packed, int rows, int cols);
 
     void unpack_bits(uint8_t* x_packed, uint8_t **x, int rows, int cols) ;
+
+    void pack_data(uint64_t *x, uint64_t *x_packed, int length, int bw);
+
+    void unpack_data(uint64_t *x_packed, uint64_t *x, int length, int bw);
 };
 
 #endif

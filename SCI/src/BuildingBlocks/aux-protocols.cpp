@@ -1031,13 +1031,162 @@ void AuxProtocols::nMinus1OUTNOT(block128 *seed, uint64_t length, uint64_t offse
 }
 
 
+void AuxProtocols::nMinus1OUTNOT_batch_reverse(block128 *seed, uint64_t batch_size, uint64_t length, uint64_t *offset) {
+    const int tree_depth = static_cast<int>(std::ceil(std::log2(length)));
+    const int leaves_size = static_cast<int>(std::pow(2, tree_depth));
+    auto *batch_GGM_leaves = new block128[batch_size * leaves_size]();
+    PRG128 prg;
+    if (party == BOB) {
+        block128 *my_seed = new block128[batch_size];
+        prg.random_block(my_seed, batch_size);
+        auto **layer_OT_sum_seed = new block128 *[2];
+        layer_OT_sum_seed[0] = new block128[tree_depth * batch_size];
+        layer_OT_sum_seed[1] = new block128[tree_depth * batch_size];
+        // build tree
+        for (int i = 0; i < batch_size; i++) {
+            batch_GGM_leaves[i * leaves_size] = my_seed[i];
+        }
+        auto *temp_data = new block128[2];
+
+        // parameters for layer0
+        uint32_t points_this_layer = 1;
+        uint32_t step_size = leaves_size / points_this_layer;
+        uint32_t step_size_last_layer = 2 * step_size;
+        uint32_t points_last_layer = points_this_layer / 2;
+        for (int i = 1; i <= tree_depth; i++) {
+            points_this_layer *= 2;
+            step_size = leaves_size / points_this_layer;
+            step_size_last_layer = 2 * step_size;
+            points_last_layer = points_this_layer / 2;
+            for (int j = 0; j < points_last_layer; j++) {
+                // see through the nodes in each layer
+                for (int k = 0; k < batch_size; k++) {
+                    prg.reseed(&batch_GGM_leaves[k * leaves_size + j * step_size_last_layer]);
+                    prg.random_block(temp_data, 2);
+                    batch_GGM_leaves[k * leaves_size + j * step_size_last_layer] = temp_data[0];
+                    batch_GGM_leaves[k * leaves_size + j * step_size_last_layer + step_size] = temp_data[1];
+                }
+            }
+            for (int k = 0; k < batch_size; k++) {
+                layer_OT_sum_seed[0][k * tree_depth + i - 1] = batch_GGM_leaves[k * leaves_size + 0];
+                layer_OT_sum_seed[1][k * tree_depth + i - 1] = batch_GGM_leaves[k * leaves_size + step_size];
+                for (int j = 2; j < points_this_layer; j += 2) {
+                    layer_OT_sum_seed[0][k * tree_depth + i - 1] = _mm_xor_si128(
+                        layer_OT_sum_seed[0][k * tree_depth + i - 1],
+                        batch_GGM_leaves[k * leaves_size + j * step_size]);
+                    layer_OT_sum_seed[1][k * tree_depth + i - 1] = _mm_xor_si128(
+                        layer_OT_sum_seed[1][k * tree_depth + i - 1],
+                        batch_GGM_leaves[k * leaves_size + (j + 1) * step_size]);
+                }
+            }
+            // std::cout << std::endl;
+            // for (int ii = 0; ii < leaves_size; ii++) {
+            //     print_block(batch_GGM_leaves[ii]);
+            // }
+            // std::cout << std::endl;
+        }
+        delete[] temp_data;
+        otpack->iknp_reversed->send(layer_OT_sum_seed[0], layer_OT_sum_seed[1], (tree_depth * batch_size));
+        // #ifndef NDEBUG
+        // std::cout << std::endl;
+        // for (int i = 0; i < leaves_size; i++) {
+        //     print_block(batch_GGM_leaves[i]);
+        // }
+        // std::cout << std::endl;
+        // #endif
+        for (int i = 0; i < 2; i++) {
+            delete[] layer_OT_sum_seed[i];
+        }
+        delete[] layer_OT_sum_seed;
+    }
+    else {
+        auto *r = new bool[tree_depth * batch_size];
+        auto *layer_OT_sum_seed = new block128[tree_depth * batch_size];
+        for (int i = 1; i <= tree_depth; i++) {
+            for (int k = 0; k < batch_size; k++) {
+                r[k * tree_depth + i - 1] = (offset[k] >> (tree_depth - i) & 1) ^ 1; // extract i-th bit
+            }
+        }
+        otpack->iknp_reversed->recv(layer_OT_sum_seed, r, tree_depth * batch_size);
+        // build the punctured tree
+        // the parameters of layer1
+        uint32_t points_this_layer = 2;
+        uint32_t step_size = leaves_size / points_this_layer;
+        uint32_t step_size_last_layer = 2 * step_size;
+        uint32_t points_last_layer = points_this_layer / 2;
+        uint32_t skip_index = 0;
+        auto *temp_data = new block128[2];
+        for (int k = 0; k < batch_size; k++) {
+            points_this_layer = 2;
+            step_size = leaves_size / points_this_layer;
+            step_size_last_layer = 2 * step_size;
+            points_last_layer = points_this_layer / 2;
+            skip_index = r[0 + k * tree_depth] ^ 1;
+            batch_GGM_leaves[k * leaves_size + r[0 + k * tree_depth] * step_size] = layer_OT_sum_seed[0 + k * tree_depth];
+            for (int i = 2; i <= tree_depth; i++) {
+                points_this_layer *= 2;
+                step_size = leaves_size / points_this_layer;
+                step_size_last_layer = 2 * step_size;
+                points_last_layer = points_this_layer / 2;
+                // first build the tree
+                for (int j = 0; j < points_last_layer; j++) {
+                    if (j == skip_index) {
+                        continue;
+                    }
+                    prg.reseed(&batch_GGM_leaves[k * leaves_size + j * step_size_last_layer]);
+                    prg.random_block(temp_data, 2);
+                    batch_GGM_leaves[k * leaves_size + j * step_size_last_layer] = temp_data[0];
+                    batch_GGM_leaves[k * leaves_size + j * step_size_last_layer + step_size] = temp_data[1];
+                }
+
+                // std::cout << std::endl;
+                // for (int ii = 0; ii < leaves_size; ii++) {
+                //     print_block(batch_GGM_leaves[ii]);
+                // }
+                // std::cout << std::endl;
+
+                block128 temp = layer_OT_sum_seed[k * tree_depth + i - 1];
+                for (int j = 0; j < points_this_layer; j += 2) {
+                    temp = _mm_xor_si128(
+                        temp, batch_GGM_leaves[k * leaves_size + (j + r[k * tree_depth + i - 1]) * step_size]);
+                }
+                batch_GGM_leaves[k * leaves_size + skip_index * step_size_last_layer + step_size * r[k * tree_depth + i - 1]]
+                        = temp;
+                skip_index = (skip_index << 1) + (r[k * tree_depth + i - 1] ^ 1);
+
+                // std::cout << std::endl;
+                // for (int ii = 0; ii < leaves_size; ii++) {
+                //     print_block(batch_GGM_leaves[ii]);
+                // }
+                // std::cout << std::endl;
+            }
+        }
+        // #ifndef NDEBUG
+        // std::cout << std::endl;
+        // for (int i = 0; i < leaves_size; i++) {
+        //     print_block(batch_GGM_leaves[i]);
+        // }
+        // std::cout << std::endl;
+        // #endif
+        delete[] temp_data;
+        delete[] r;
+        delete[] layer_OT_sum_seed;
+    }
+    for (int i = 0; i < batch_size; i++) {
+        memcpy(seed + i * length, batch_GGM_leaves + i * leaves_size, length * 16 * sizeof(uint8_t));
+    }
+    // memcpy(seed, batch_GGM_leaves, batch_size * length * 16 * sizeof(uint8_t));
+    delete[] batch_GGM_leaves;
+}
+
+
 // batch aims to make n times m length to nm length
 void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint64_t length, uint64_t *offset) {
     const int tree_depth = static_cast<int>(std::ceil(std::log2(length)));
     const int leaves_size = static_cast<int>(std::pow(2, tree_depth));
     auto *batch_GGM_leaves = new block128[batch_size * leaves_size]();
     PRG128 prg;
-    if (party == sci::ALICE) {
+    if (party == ALICE) {
         block128 *my_seed = new block128[batch_size];
         prg.random_block(my_seed, batch_size);
         auto **layer_OT_sum_seed = new block128 *[2];
@@ -1099,7 +1248,8 @@ void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint
             delete[] layer_OT_sum_seed[i];
         }
         delete[] layer_OT_sum_seed;
-    } else {
+    }
+    else {
         auto *r = new bool[tree_depth * batch_size];
         auto *layer_OT_sum_seed = new block128[tree_depth * batch_size];
         for (int i = 1; i <= tree_depth; i++) {

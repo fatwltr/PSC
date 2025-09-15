@@ -109,6 +109,7 @@ int main(int argc, char **argv) {
     comm_second = iopack->get_comm() - comm_second;
     long long sort_time = time_from(sort_start);
 
+    cout << endl;
     cout << "Ex-sort Time\t" << sort_time / (1000.0) << " ms" << endl;
     cout << "Ex-sort Bytes Sent\t" << comm_second << " bytes" << endl;
 

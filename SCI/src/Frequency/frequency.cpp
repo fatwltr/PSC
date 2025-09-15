@@ -755,6 +755,52 @@ void Frequency::unpack_bits(uint8_t *x_packed, uint8_t **x, int rows, int cols) 
     }
 }
 
+
+void Frequency::pack_data(uint64_t *x, uint64_t *x_packed, int length, int bw) {
+    int total_bits = length * bw;
+    int num_words = (total_bits + 63) / 64;
+
+    uint64_t bit_pos = 0;
+
+    for (int i = 0; i < length; i++) {
+        uint64_t val = x[i] & ((bw == 64) ? ~0ULL : ((1ULL << bw) - 1));
+        int word_idx = bit_pos / 64;
+        int bit_off = bit_pos % 64;
+
+        x_packed[word_idx] |= (val << bit_off);
+
+        if (bit_off + bw > 64 && word_idx + 1 < num_words) {
+            x_packed[word_idx + 1] |= (val >> (64 - bit_off));
+        }
+
+        bit_pos += bw;
+    }
+}
+
+void Frequency::unpack_data(uint64_t *x_packed, uint64_t *x, int length, int bw) {
+    int total_bits = length * bw;
+    int num_words = (total_bits + 63) / 64;
+
+    uint64_t bit_pos = 0;
+    uint64_t mask = (bw == 64) ? ~0ULL : ((1ULL << bw) - 1);
+
+    for (int i = 0; i < length; i++) {
+        int word_idx = bit_pos / 64;
+        int bit_off = bit_pos % 64;
+
+        uint64_t val = (x_packed[word_idx] >> bit_off);
+        if (bit_off + bw > 64 && word_idx + 1 < num_words) {
+            int shift = 64 - bit_off;
+            if (shift < 64) {
+                val |= x_packed[word_idx + 1] << shift;
+            }
+        }
+
+        x[i] = val & mask;
+        bit_pos += bw;
+    }
+}
+
 void print_block_(const block128 &b) {
     uint8_t bytes[16];
     _mm_storeu_si128((__m128i *) bytes, b); // copy to byte array
@@ -778,15 +824,24 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
     // }
     // cout << endl;
 
+    num_data += 1;
+
     // share conversion 2^bw_data -> num_data
     uint8_t *t = new uint8_t[num_stand]();
     uint64_t *appendix = new uint64_t[num_stand]();
-    this->aux->wrap_computation(endpoints, t, num_stand, bw_data);
-    this->aux->multiplexer_two_plain(t, (1ULL << bw_data) % num_data, appendix, num_stand, bw_data, bw_data);
+    this->aux->wrap_computation(endpoints, t, num_stand, bw_res);
+    std::vector<uint64_t> v(1, num_data);
+    this->aux->B2A_coprimes(t, appendix, num_stand, v);
+    // cout << endl;
+    // for (int i = 0; i < num_stand; i++) {
+    //     cout << (int) appendix[i] << " ";
+    // }
+    // cout << endl;
     for (int i = 0; i < num_stand; i++) {
-        endpoints[i] -= appendix[i];
+        endpoints[i] = (endpoints[i] % num_data) + (num_data - (1ULL << bw_res) % num_data) * (appendix[i]);
         endpoints[i] %= num_data;
     }
+
     // cout << num_data << " ";
     // cout << endl;
     // for (int i = 0; i < num_stand; i++) {
@@ -856,13 +911,13 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
                     prg[i * num_data * 2 + j].random_bool((bool *) shift_translate[j], save_memory);
                 }
 
-                cout << "shift_translate" << endl;
-                for (int j = 0; j < num_data * 2; j++) {
-                    for (int l = 0; l < save_memory; l++) {
-                        cout << (int) shift_translate[j][l] << " ";
-                    }
-                    cout << endl;
-                }
+                // cout << "shift_translate" << endl;
+                // for (int j = 0; j < num_data * 2; j++) {
+                //     for (int l = 0; l < save_memory; l++) {
+                //         cout << (int) shift_translate[j][l] << " ";
+                //     }
+                //     cout << endl;
+                // }
 
                 for (int j = 0; j < num_data * 2; j++) {
                     for (int l = 0; l < save_memory; l++) {
@@ -879,13 +934,13 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
             for (int j = 0; j < num_data * 2; j++) {
                 prg[i * num_data * 2 + j].random_bool((bool *) shift_translate[j], last);
             }
-            cout << "shift_translate" << endl;
-            for (int j = 0; j < num_data * 2; j++) {
-                for (int l = 0; l < last; l++) {
-                    cout << (int) shift_translate[j][l] << " ";
-                }
-                cout << endl;
-            }
+            // cout << "shift_translate" << endl;
+            // for (int j = 0; j < num_data * 2; j++) {
+            //     for (int l = 0; l < last; l++) {
+            //         cout << (int) shift_translate[j][l] << " ";
+            //     }
+            //     cout << endl;
+            // }
             for (int j = 0; j < num_data * 2; j++) {
                 for (int l = 0; l < last; l++) {
                     a[i][l + k * save_memory] ^= shift_translate[j][l];
@@ -943,7 +998,6 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         pack_bits(x, x_packed, num_stand, 2 * num_data);
         iopack->io->send_data(x_packed, ((2 * num_data * num_stand + 7) / 8) * sizeof(uint8_t));
 
-
         // allocate the uniShr, and the
         auto **mux_choice = new uint8_t *[num_stand];
         for (int i = 0; i < num_stand; i++) {
@@ -956,7 +1010,13 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         for (int i = 0; i < num_stand; i++) {
             temp[i] = num_data - endpoints[i];
         }
+
         this->aux->mill->compare(t, temp, num_stand, bw_data);
+
+        for (int i = 0; i < num_stand; i++) {
+            t[i] = 1 ^ t[i];
+        }
+
         // mux_choice padding a 0-string
         this->aux->multiplexer_bShr(t, mux_choice, uniShr, num_stand, num_data * 2);
         for (int i = 0; i < num_stand; i++) {
@@ -965,6 +1025,7 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
                 uniShr[i][j] ^= uniShr[i][j + num_data];
             }
         }
+
         for (int i = 0; i < num_data * 2; i++) {
             delete[] shift_translate[i];
         }
@@ -975,8 +1036,8 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
             delete[] mux_choice[i];
         }
         delete[] x_packed;
-        delete[] mux_choice;
         delete[] temp;
+        delete[] mux_choice;
         delete[] a;
         delete[] b;
     } else {
@@ -1075,7 +1136,6 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         auto *xMa_packed = new uint8_t[(2 * num_data * num_stand + 7) / 8];
         iopack->io->recv_data(xMa_packed, ((2 * num_data * num_stand + 7) / 8) * sizeof(uint8_t));
         unpack_bits(xMa_packed, xMa, num_stand, 2 * num_data);
-        delete[] xMa_packed;
 
         // cout << endl;
         // cout << "------------xMa-------------" << endl;
@@ -1085,7 +1145,6 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         //     }
         //     cout << endl;
         // }
-
 
         for (int i = 0; i < num_stand; i++) {
             std::memcpy(shift_xMa[i], xMa[i] + (2 * num_data - endpoints[i]), endpoints[i]);
@@ -1118,8 +1177,6 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         // }
 
 
-        // seems choose the wrong side, and need some modification to solve the situation
-        uint8_t *first_half = new uint8_t[num_stand]();
         auto **mux_choice = new uint8_t *[num_stand];
         for (int i = 0; i < num_stand; i++) {
             mux_choice[i] = new uint8_t[num_data * 2](); // *2 due to the shifted vector is shared
@@ -1127,15 +1184,18 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
                 mux_choice[i][j] = x[i][j - num_data] ^ x[i][j];
             }
         }
+
         this->aux->mill->compare(t, endpoints, num_stand, bw_data);
         // mux_choice padding a 0-string
-        this->aux->multiplexer_bShr(first_half, mux_choice, uniShr, num_stand, num_data * 2);
+
+        this->aux->multiplexer_bShr(t, mux_choice, uniShr, num_stand, num_data * 2);
         for (int i = 0; i < num_stand; i++) {
             for (int j = num_data; j < 2 * num_data; j++) {
                 uniShr[i][j] ^= x[i][j];
                 uniShr[i][j - num_data] ^= uniShr[i][j];
             }
         }
+
         for (int i = 0; i < 2 * num_data; i++) {
             delete[] shift_translate[i];
         }
@@ -1148,11 +1208,16 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         }
         delete[] c;
         delete[] xMa;
+        delete[] xMa_packed;
         delete[] shift_xMa;
+        // delete[] temp;
         delete[] mux_choice;
-        delete[] first_half;
     }
 
+
+    cout << "temp checkpoint. " << endl;
+
+    // cout << "uniShr: " << endl;
     // for (int i = 0; i < num_stand; i++) {
     //     cout << endl;
     //     for (int j = 0; j < num_data; j++) {
@@ -1166,20 +1231,43 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         for (int j = 0; j < num_data; j++) {
             interval_indicate[0][j] = 1 ^ uniShr[0][j];
         }
+    } else {
+        for (int j = 0; j < num_data; j++) {
+            interval_indicate[0][j] = uniShr[0][j];
+        }
     }
     for (int i = 1; i < num_stand; i++) {
         for (int j = 0; j < num_data; j++) {
             interval_indicate[i][j] = uniShr[i][j] ^ uniShr[i - 1][j];
         }
     }
-    uint64_t *temp = new uint64_t[num_data]();
-    // MUX, can batch
+    // cout << "interval_indicate" << endl;
+    // for (int i = 0; i < num_stand; i++) {
+    //     cout << endl;
+    //     for (int j = 0; j < num_data; j++) {
+    //         cout << (int) interval_indicate[i][j] << ", ";
+    //     }
+    // }
+    // cout << endl;
+
+
+    uint64_t *temp_res = new uint64_t[num_data - 1]();
+    // MUX, can batch   little gain as we set num_stand not too large
     for (int i = 0; i < num_stand; i++) {
-        aux->multiplexer_two_plain(interval_indicate[i], i, temp, num_data, bw_data, bw_data);
-        for (int j = 0; j < num_data; j++) {
-            res[j] += temp[j];
+        aux->multiplexer_two_plain(interval_indicate[i], (i + 1), temp_res, num_data - 1, bw_res, bw_res);
+        for (int j = 0; j < num_data - 1; j++) {
+            res[j] += temp_res[j];
+            res[j] &= (1ULL << bw_res) - 1;
         }
     }
+
+
+    // cout << "sorted_res" << endl;
+    // for (int j = 0; j < num_data - 1; j++) {
+    //     cout << (int) res[j] << ", ";
+    // }
+    //
+    // cout << endl;
 
     delete[] endpoints;
     delete[] t;
@@ -1196,7 +1284,7 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
     delete[] interval_indicate;
 }
 
-void random_permutation(uint32_t *perm, int n) {
+void random_permutation(uint64_t *perm, int n) {
     // initialize with 0, 1, 2, ..., n-1
     for (int i = 0; i < n; ++i) {
         perm[i] = i;
@@ -1214,18 +1302,459 @@ void random_permutation(uint32_t *perm, int n) {
     }
 }
 
+void plain_shuffle(uint64_t *perm, uint64_t *data, int length) {
+    std::vector<uint64_t> tmp(length);
+
+    for (int i = 0; i < length; i++) {
+        // cout << "perm[i]= " << perm[i] << endl;
+        tmp[perm[i]] = data[i];
+    }
+
+    for (int i = 0; i < length; i++) {
+        data[i] = tmp[i];
+    }
+}
+
+void Frequency::oblivious_shuffle(uint64_t *res, uint64_t *perm, uint64_t *data, int num_data, int32_t bw_data) {
+    // opv
+    if (party == ALICE) {
+        block128 *seeds = new block128[num_data * num_data]();
+        uint64_t *shuffle_matrix = new uint64_t[num_data * num_data]();
+        PRG128 prg;
+        this->aux->nMinus1OUTNOT_batch(seeds, num_data, num_data, nullptr);
+
+        // cout << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     print_block_(seeds[i]);
+        // }
+        // cout << endl;
+        for (int i = 0; i < num_data; i++) {
+            for (int j = 0; j < num_data; j++) {
+                prg.reseed(&seeds[i * num_data + j]);
+                prg.random_data(&shuffle_matrix[i * num_data + j], sizeof(uint64_t));
+            }
+        }
+        delete[] seeds;
+
+        // cout << endl;
+        // cout << "shuffle_matrix: " << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     for (int j = 0; j < num_data; j++) {
+        //         cout << (shuffle_matrix[i * num_data + j] & ((1ULL << 3) - 1)) << " ";
+        //     }
+        //     cout << endl;
+        // }
+        // cout << endl;
+
+        uint64_t *a = new uint64_t[num_data]();
+        uint64_t *b = new uint64_t[num_data](); // related to the -b in the protocol description
+        for (int i = 0; i < num_data; i++) {
+            for (int j = 0; j < num_data; j++) {
+                a[i] += shuffle_matrix[i * num_data + j];
+                b[j] -= shuffle_matrix[i * num_data + j];
+            }
+        }
+
+        // cout << "a: " << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << (a[i] & ((1ULL << 3) - 1)) << " ";
+        // }
+        // cout << endl;
+
+        // cout << "b: " << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << (b[i] & ((1ULL << 3) - 1)) << " ";
+        // }
+        // cout << endl;
+
+        uint64_t *xMa = new uint64_t[num_data]();
+        int packed_length = (num_data * bw_data + 63) / 64;
+        uint64_t *xMa_packed = new uint64_t[packed_length]();
+        for (int i = 0; i < num_data; i++) {
+            xMa[i] = data[i] + a[i];
+        }
+
+        pack_data(xMa, xMa_packed, num_data, bw_data);
+        iopack->io->send_data(xMa_packed, packed_length * sizeof(uint64_t));
+
+        for (int i = 0; i < num_data; i++) {
+            res[i] = b[i];
+        }
+        delete[] xMa;
+        delete[] xMa_packed;
+        delete[] shuffle_matrix;
+        delete[] a;
+        delete[] b;
+    } else {
+        block128 *seeds = new block128[num_data * num_data]();
+        uint64_t *shuffle_matrix = new uint64_t[num_data * num_data]();
+        this->aux->nMinus1OUTNOT_batch(seeds, num_data, num_data, perm);
+
+        // cout << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     print_block_(seeds[i]);
+        // }
+        // cout << endl;
+        PRG128 prg;
+        for (int i = 0; i < num_data; i++) {
+            for (int j = 0; j < num_data; j++) {
+                prg.reseed(&seeds[i * num_data + j]);
+                prg.random_data(&shuffle_matrix[i * num_data + j], sizeof(uint64_t));
+            }
+        }
+        delete[] seeds;
+
+        // cout << endl;
+        // cout << "shuffle_matrix: " << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     for (int j = 0; j < num_data; j++) {
+        //         cout << (shuffle_matrix[i * num_data + j] & ((1ULL << 3) - 1)) << " ";
+        //     }
+        //     cout << endl;
+        // }
+        // cout << endl;
+
+        uint64_t *c = new uint64_t[num_data](); // c is b-\pi(a)
+        for (int i = 0; i < num_data; i++) {
+            for (int j = 0; j < num_data; j++) {
+                c[perm[i]] -= shuffle_matrix[i * num_data + j];
+                c[j] += shuffle_matrix[i * num_data + j];
+            }
+        }
+
+
+        // cout << "c: " << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << (c[i] & ((1ULL << 3) - 1)) << " ";
+        // }
+        // cout << endl;
+
+        uint64_t *xMa = new uint64_t[num_data]();
+        int packed_length = (num_data * bw_data + 63) / 64;
+        uint64_t *xMa_packed = new uint64_t[packed_length]();
+        iopack->io->recv_data(xMa_packed, packed_length * sizeof(uint64_t));
+        unpack_data(xMa_packed, xMa, num_data, bw_data);
+        plain_shuffle(perm, xMa, num_data);
+        for (int i = 0; i < num_data; i++) {
+            res[i] = xMa[i] + c[i];
+        }
+
+        delete[] xMa;
+        delete[] xMa_packed;
+        delete[] shuffle_matrix;
+        delete[] c;
+    }
+}
+
+void Frequency::oblivious_shuffle_reverse(uint64_t *res, uint64_t *perm, uint64_t *data, int num_data,
+                                          int32_t bw_data) {
+    // opv
+    if (party == BOB) {
+        block128 *seeds = new block128[num_data * num_data]();
+        uint64_t *shuffle_matrix = new uint64_t[num_data * num_data]();
+        PRG128 prg;
+        this->aux->nMinus1OUTNOT_batch_reverse(seeds, num_data, num_data, nullptr);
+        // cout << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     print_block_(seeds[i]);
+        // }
+        // cout << endl;
+        for (int i = 0; i < num_data; i++) {
+            for (int j = 0; j < num_data; j++) {
+                prg.reseed(&seeds[i * num_data + j]);
+                prg.random_data(&shuffle_matrix[i * num_data + j], sizeof(uint64_t));
+            }
+        }
+        delete[] seeds;
+
+        // cout << endl;
+        // cout << "shuffle_matrix: " << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     for (int j = 0; j < num_data; j++) {
+        //         cout << (shuffle_matrix[i * num_data + j] & ((1ULL << 3) - 1)) << " ";
+        //     }
+        //     cout << endl;
+        // }
+        // cout << endl;
+
+        uint64_t *a = new uint64_t[num_data]();
+        uint64_t *b = new uint64_t[num_data](); // related to the -b in the protocol description
+        for (int i = 0; i < num_data; i++) {
+            for (int j = 0; j < num_data; j++) {
+                a[i] += shuffle_matrix[i * num_data + j];
+                b[j] -= shuffle_matrix[i * num_data + j];
+            }
+        }
+
+        // cout << "a: " << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << (a[i] & ((1ULL << 3) - 1)) << " ";
+        // }
+        // cout << endl;
+
+        // cout << "b: " << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << (b[i] & ((1ULL << 3) - 1)) << " ";
+        // }
+        // cout << endl;
+
+        uint64_t *xMa = new uint64_t[num_data]();
+        int packed_length = (num_data * bw_data + 63) / 64;
+        uint64_t *xMa_packed = new uint64_t[packed_length]();
+        for (int i = 0; i < num_data; i++) {
+            xMa[i] = data[i] + a[i];
+        }
+
+        pack_data(xMa, xMa_packed, num_data, bw_data);
+        iopack->io->send_data(xMa_packed, packed_length * sizeof(uint64_t));
+
+
+        for (int i = 0; i < num_data; i++) {
+            res[i] = b[i];
+        }
+        delete[] xMa;
+        delete[] xMa_packed;
+        delete[] shuffle_matrix;
+        delete[] a;
+        delete[] b;
+    } else {
+        block128 *seeds = new block128[num_data * num_data]();
+        uint64_t *shuffle_matrix = new uint64_t[num_data * num_data]();
+        this->aux->nMinus1OUTNOT_batch_reverse(seeds, num_data, num_data, perm);
+        // cout << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     print_block_(seeds[i]);
+        // }
+        // cout << endl;
+        PRG128 prg;
+        for (int i = 0; i < num_data; i++) {
+            for (int j = 0; j < num_data; j++) {
+                prg.reseed(&seeds[i * num_data + j]);
+                prg.random_data(&shuffle_matrix[i * num_data + j], sizeof(uint64_t));
+            }
+        }
+        delete[] seeds;
+
+        // cout << endl;
+        // cout << "shuffle_matrix: " << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     for (int j = 0; j < num_data; j++) {
+        //         cout << (shuffle_matrix[i * num_data + j] & ((1ULL << 3) - 1)) << " ";
+        //     }
+        //     cout << endl;
+        // }
+        // cout << endl;
+
+        uint64_t *c = new uint64_t[num_data](); // c is b-\pi(a)
+        for (int i = 0; i < num_data; i++) {
+            for (int j = 0; j < num_data; j++) {
+                c[perm[i]] -= shuffle_matrix[i * num_data + j];
+                c[j] += shuffle_matrix[i * num_data + j];
+            }
+        }
+
+        // cout << "c: " << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << (c[i] & ((1ULL << 3) - 1)) << " ";
+        // }
+        // cout << endl;
+
+        uint64_t *xMa = new uint64_t[num_data]();
+        int packed_length = (num_data * bw_data + 63) / 64;
+        uint64_t *xMa_packed = new uint64_t[packed_length]();
+        iopack->io->recv_data(xMa_packed, packed_length * sizeof(uint64_t));
+        unpack_data(xMa_packed, xMa, num_data, bw_data);
+        plain_shuffle(perm, xMa, num_data);
+        for (int i = 0; i < num_data; i++) {
+            res[i] = xMa[i] + c[i];
+        }
+        delete[] xMa;
+        delete[] xMa_packed;
+        delete[] shuffle_matrix;
+        delete[] c;
+    }
+}
+
+
+// Function to partition the array
+int Frequency::partition(uint64_t *arr, int low, int high, int bw) {
+    int pivot = arr[high]; // choose the last element as pivot
+    int i = low - 1; // index of smaller element
+    uint64_t mask_l = (1ULL << bw) - 1;
+    uint8_t res;
+    uint8_t res_t;
+    uint64_t Za;
+    uint64_t compare_with;
+    for (int j = low; j < high; j++) {
+        // cout << pivot << " " << arr[j] << endl;
+        // conduct a private cmp
+        if (party == sci::ALICE) {
+            Za = (pivot - arr[j]) & mask_l;
+            compare_with = Za & ((1 << (bw - 1)) - 1);
+            // std::cout << "wa: " << compare_with << std::endl;
+            aux->mill->compare(&res, &compare_with, 1, bw);
+            // std::cout << "res: " << static_cast<uint32_t>(res) << std::endl;
+            uint8_t ba = Za < (1 << (bw - 1));
+            // std::cout << "ba: " << static_cast<uint32_t>(ba) << std::endl;
+            res ^= ba;
+            // std::cout << static_cast<uint32_t>(res) << " ";
+            iopack->io->send_data(&res, sizeof(uint8_t));
+            iopack->io->recv_data(&res_t, sizeof(uint8_t));
+        } else {
+            uint64_t Zb = (pivot - arr[j]) & mask_l;
+            compare_with = (1 << (bw - 1)) - (Zb & ((1 << (bw - 1)) - 1));
+            // std::cout << "t/2 - wb: " << compare_with << std::endl;
+            aux->mill->compare(&res, &compare_with, 1, bw);
+            // std::cout << "res: " << static_cast<uint32_t>(res) << std::endl;
+            uint8_t bb = Zb < (1 << (bw - 1));
+            // std::cout << "bb: " << static_cast<uint32_t>(bb) << std::endl;
+            res ^= bb;
+            res ^= 1;
+            // std::cout << static_cast<uint32_t>(res) << " ";
+            iopack->io->recv_data(&res_t, sizeof(uint8_t));
+            iopack->io->send_data(&res, sizeof(uint8_t));
+        }
+        // cout << (int)(res_t ^ res) << endl;
+        if (res_t ^ res) {
+            i++;
+            swap(arr[i], arr[j]);
+        }
+    }
+    swap(arr[i + 1], arr[high]);
+    return i + 1;
+}
+
+// Quicksort function
+void Frequency::quickSort(uint64_t *arr, int low, int high, int bw) {
+    if (low < high) {
+        int pi = partition(arr, low, high, bw); // partition index
+
+        // Recursively sort elements before and after partition
+        quickSort(arr, low, pi - 1, bw);
+        quickSort(arr, pi + 1, high, bw);
+    }
+}
+
+
 void Frequency::shuffle_sort(uint64_t *res, uint64_t *data, int num_stand, int num_data,
                              int32_t bw_data, int32_t bw_res) {
-    // oblivious shuffle
-    // 1. element extend
-    // 2. opv
-    // 3. shuffle
-    uint32_t *perm = new uint32_t[num_data]();
+    // for (int i = 0; i < num_data; i++) {
+    //     cout << data[i] << " ";
+    // }
+    // cout << endl;
+    uint64_t *perm = new uint64_t[num_data]();
+    int bw_append = ceil(log2(num_data + 1));
+    int bw_tot = bw_data + bw_append;
     random_permutation(perm, num_data);
-    for (int i = 0; i < num_data; i++) {
-        cout << perm[i] << " ";
-    }
-    cout << endl;
+    // cout << "bw_tot = " << bw_tot << endl;
+    // cout << "bw_data = " << bw_data << endl;
+    // for (int i = 0; i < num_data; i++) {
+    //     cout << perm[i] << " ";
+    // }
+    // cout << endl;
+    if (party == ALICE) {
+        // element extend to make each element distinct.
+        for (int i = 0; i < num_data; i++) {
+            data[i] = (data[i] << bw_append);
+            data[i] += i;
+        }
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << perm[i] << " ";
+        // }
+        // cout << endl;
+        oblivious_shuffle(res, nullptr, data, num_data, bw_tot);
+        for (int i = 0; i < num_data; i++) {
+            data[i] = res[i];
+            data[i] &= (1ULL << bw_tot) - 1;
+        }
 
+        // cout << "----------------" << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << perm[i] << " ";
+        // }
+        // cout << endl;
+
+        // cout << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << (data[i] & ((1ULL << bw_append) - 1)) << " ";
+        // }
+        // cout << endl;
+
+        oblivious_shuffle_reverse(res, perm, nullptr, num_data, bw_tot);
+        plain_shuffle(perm, data, num_data);
+        for (int i = 0; i < num_data; i++) {
+            data[i] = data[i] + res[i];
+            data[i] &= (1ULL << bw_tot) - 1;
+        }
+
+        // cout << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << (data[i] & ((1ULL << bw_append) - 1)) << " ";
+        // }
+        // cout << endl;
+    } else {
+        for (int i = 0; i < num_data; i++) {
+            data[i] = data[i] << bw_append;
+        }
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << perm[i] << " ";
+        // }
+        // cout << endl;
+        oblivious_shuffle(res, perm, nullptr, num_data, bw_tot);
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << perm[i] << " ";
+        // }
+        // cout << endl;
+        // cout << "----------------" << endl;
+        plain_shuffle(perm, data, num_data);
+        for (int i = 0; i < num_data; i++) {
+            data[i] = data[i] + res[i];
+            data[i] &= (1ULL << bw_tot) - 1;
+        }
+
+
+        // cout << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << (res[i] & ((1ULL << bw_append) - 1)) << " ";
+        // }
+        // cout << endl;
+
+        oblivious_shuffle_reverse(res, nullptr, data, num_data, bw_tot);
+        for (int i = 0; i < num_data; i++) {
+            data[i] = res[i];
+            data[i] &= (1ULL << bw_tot) - 1;
+        }
+
+        // cout << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << (data[i] & ((1ULL << bw_append) - 1)) << " ";
+        // }
+        // cout << endl;
+    }
+
+    xt->z_extend(num_data, data, data, bw_tot, bw_tot + 1); // for compare, we need one more bit
+    // cout << endl;
+    // for (int i = 0; i < num_data; i++) {
+    //     cout << (data[i] & ((1ULL << (bw_tot + 1)) - 1)) << " ";
+    // }
+    // cout << endl;
+    // cout << endl;
+    // for (int i = 0; i < num_data; i++) {
+    //     cout << (data[i] & ((1ULL << bw_tot) - 1)) << " ";
+    // }
+    // cout << endl;
     // quick sort
+    quickSort(data, 0, num_data - 1, bw_tot + 1);
+    // cout << endl;
+    // for (int i = 0; i < num_data; i++) {
+    //     cout << (data[i] & ((1ULL << bw_tot) - 1)) << " ";
+    // }
+    // cout << endl;
+    trunc->truncate_and_reduce(num_data, data, res, bw_append, bw_tot);
+    // cout << endl;
+    // for (int i = 0; i < num_data; i++) {
+    //     cout << (res[i] & ((1ULL << bw_data) - 1)) << " ";
+    // }
+    // cout << endl;
+    delete[] perm;
 }

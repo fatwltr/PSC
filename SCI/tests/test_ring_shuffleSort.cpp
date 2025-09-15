@@ -37,14 +37,14 @@ int main(int argc, char **argv) {
     for (int i = 0; i < num_stand; ++i) {
         stand[i] = i;
     }
-    uint64_t *res = new uint64_t[num_stand]();
+    uint64_t *res = new uint64_t[num_data]();
     int bw_data = ceil(log2(num_stand + 1));
     int bw_res = ceil(log2(num_data + 1));
 
     PRG128 prg;
     prg.random_data(data, num_data * sizeof(uint64_t));
     for (int i = 0; i < num_data; ++i) {
-        data[i] %= num_stand;
+        data[i] &= (1ULL << bw_data) - 1;
     }
 
     auto start = clock_start();

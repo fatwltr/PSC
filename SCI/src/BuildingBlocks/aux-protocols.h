@@ -180,6 +180,7 @@ public:
     void nMinus1OUTNOT(sci::block128 *seeds, uint64_t length, uint64_t offset, uint8_t thread_used);
 
     void nMinus1OUTNOT_batch(sci::block128 *seeds, uint64_t batch_size, uint64_t length, uint64_t *offset);
+    void nMinus1OUTNOT_batch_reverse(sci::block128 *seeds, uint64_t batch_size, uint64_t length, uint64_t *offset);
 
     // set the corresponding value at once -- naive
     void uniShare_naive_bool(uint8_t *uniShr, int length, uint64_t offset, uint8_t thread_used);
