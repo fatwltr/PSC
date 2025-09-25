@@ -62,7 +62,7 @@ int main(int argc, char **argv) {
     cout << "frequency Time\t" << t / (1000.0) << " ms" << endl;
     cout << "frequency Bytes Sent\t" << comm << " bytes" << endl;
 
-    //
+
     // if (party == ALICE) {
     //     iopack->io->send_data(data, num_data * sizeof(uint64_t));
     //     iopack->io->send_data(res, num_stand * sizeof(uint64_t));
@@ -71,18 +71,18 @@ int main(int argc, char **argv) {
     //     uint64_t *t_data = new uint64_t[num_data];
     //     iopack->io->recv_data(t_data, num_data * sizeof(uint64_t));
     //     iopack->io->recv_data(t_res, num_stand * sizeof(uint64_t));
-    //     for (int i = 0; i < num_data; ++i) {
-    //         cout << t_data[i] << " ";
-    //     }
-    //     cout << endl;
-    //     for (int i = 0; i < num_data; ++i) {
-    //         cout << data[i] << " ";
-    //     }
-    //     cout << endl;
-    //     for (int i = 0; i < num_stand; ++i) {
-    //         t_res[i] += res[i];
-    //         t_res[i] &= (1ULL << bw_res) - 1;
-    //     }
+    //     // for (int i = 0; i < num_data; ++i) {
+    //     //     cout << t_data[i] << " ";
+    //     // }
+    //     // cout << endl;
+    //     // for (int i = 0; i < num_data; ++i) {
+    //     //     cout << data[i] << " ";
+    //     // }
+    //     // cout << endl;
+    //     // for (int i = 0; i < num_stand; ++i) {
+    //     //     t_res[i] += res[i];
+    //     //     t_res[i] &= (1ULL << bw_res) - 1;
+    //     // }
     //     for (int i = 0; i < num_data; ++i) {
     //         t_data[i] += data[i];
     //         t_data[i] %= num_stand;
@@ -91,10 +91,10 @@ int main(int argc, char **argv) {
     //         cout << t_data[i] << " ";
     //     }
     //     cout << endl;
-    //     for (int i = 0; i < num_stand; ++i) {
-    //         cout << t_res[i] << " ";
-    //     }
-    //     cout << endl;
+    //     // for (int i = 0; i < num_stand; ++i) {
+    //     //     cout << t_res[i] << " ";
+    //     // }
+    //     // cout << endl;
     //
     //     delete [] t_data;
     //     delete [] t_res;

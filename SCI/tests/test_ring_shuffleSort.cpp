@@ -25,7 +25,7 @@ int main(int argc, char **argv) {
     amap.arg("eq", eq, "eq=1 use count_eq");
     amap.arg("p", port, "Port Number");
     amap.arg("nd", num_data, "Number of elements");
-    amap.arg("ns", num_stand, "Number of stands");
+    amap.arg("ns", num_stand, "Number of stands, or the k in shuffleTopk");
     amap.arg("ip", address, "IP Address of server (ALICE)");
     amap.parse(argc, argv);
 
@@ -50,7 +50,8 @@ int main(int argc, char **argv) {
     auto start = clock_start();
     uint64_t comm = iopack->get_comm();
 
-    frequency->shuffle_sort(res, data, num_stand, num_data, bw_data, bw_res);
+    // frequency->shuffle_sort(res, data, num_stand, num_data, bw_data, bw_res);
+    frequency->shuffle_topk(res, data, num_stand, num_data, bw_data, bw_res); // the res here should be num_data as the code inner shuffle_topk reuse the res.
 
     comm = iopack->get_comm() - comm;
     long long t = time_from(start);

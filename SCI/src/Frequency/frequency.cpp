@@ -818,11 +818,11 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         endpoints[i] &= (1ULL << bw_res) - 1;
     }
 
-    // cout << endl;
-    // for (int i = 0; i < num_stand; i++) {
-    //     cout << endpoints[i] << " ";
-    // }
-    // cout << endl;
+    cout << endl;
+    for (int i = 0; i < num_stand; i++) {
+        cout << endpoints[i] << " ";
+    }
+    cout << endl;
 
     num_data += 1;
 
@@ -842,12 +842,12 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         endpoints[i] %= num_data;
     }
 
-    // cout << num_data << " ";
-    // cout << endl;
-    // for (int i = 0; i < num_stand; i++) {
-    //     cout << endpoints[i] << " ";
-    // }
-    // cout << endl;
+    cout << num_data << " ";
+    cout << endl;
+    for (int i = 0; i < num_stand; i++) {
+        cout << endpoints[i] << " ";
+    }
+    cout << endl;
 
     uint64_t mask_data = (bw_data == 64 ? -1 : ((1ULL << bw_data) - 1));
     uint64_t mask_res = (bw_res == 64 ? -1 : ((1ULL << bw_res) - 1));
@@ -1016,6 +1016,13 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         for (int i = 0; i < num_stand; i++) {
             t[i] = 1 ^ t[i];
         }
+        // the result is >=
+        // cout << "t: " << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     cout << (int)t[i] << " ";
+        // }
+        // cout << endl;
+
 
         // mux_choice padding a 0-string
         this->aux->multiplexer_bShr(t, mux_choice, uniShr, num_stand, num_data * 2);
@@ -1188,6 +1195,13 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         this->aux->mill->compare(t, endpoints, num_stand, bw_data);
         // mux_choice padding a 0-string
 
+        // cout << "t: " << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     cout << (int)t[i] << " ";
+        // }
+        // cout << endl;
+
+
         this->aux->multiplexer_bShr(t, mux_choice, uniShr, num_stand, num_data * 2);
         for (int i = 0; i < num_stand; i++) {
             for (int j = num_data; j < 2 * num_data; j++) {
@@ -1215,8 +1229,8 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
     }
 
 
-    cout << "temp checkpoint. " << endl;
-
+    // cout << "temp checkpoint. " << endl;
+    //
     // cout << "uniShr: " << endl;
     // for (int i = 0; i < num_stand; i++) {
     //     cout << endl;
@@ -1751,6 +1765,188 @@ void Frequency::shuffle_sort(uint64_t *res, uint64_t *data, int num_stand, int n
     // }
     // cout << endl;
     trunc->truncate_and_reduce(num_data, data, res, bw_append, bw_tot);
+    // cout << endl;
+    // for (int i = 0; i < num_data; i++) {
+    //     cout << (res[i] & ((1ULL << bw_data) - 1)) << " ";
+    // }
+    // cout << endl;
+    delete[] perm;
+}
+
+
+
+
+
+// Partition function for top-k selection
+int Frequency::partitionTopK(uint64_t *arr, int low, int high, int bw) {
+    uint64_t pivot = arr[high]; // choose last element as pivot
+    int i = low - 1;
+    uint64_t mask_l = (1ULL << bw) - 1;
+    uint8_t res, res_t;
+    uint64_t compare_with;
+    uint64_t Za;
+
+    for (int j = low; j < high; j++) {
+        if (party == sci::ALICE) {
+            Za = (arr[j] - pivot) & mask_l;  // flip comparison to get top-k
+            compare_with = Za & ((1ULL << (bw - 1)) - 1);
+            aux->mill->compare(&res, &compare_with, 1, bw);
+            uint8_t ba = Za < (1ULL << (bw - 1));
+            res ^= ba;
+            iopack->io->send_data(&res, sizeof(uint8_t));
+            iopack->io->recv_data(&res_t, sizeof(uint8_t));
+        } else {
+            uint64_t Zb = (arr[j] - pivot) & mask_l;
+            compare_with = (1ULL << (bw - 1)) - (Zb & ((1ULL << (bw - 1)) - 1));
+            aux->mill->compare(&res, &compare_with, 1, bw);
+            uint8_t bb = Zb < (1ULL << (bw - 1));
+            res ^= bb;
+            res ^= 1;
+            iopack->io->recv_data(&res_t, sizeof(uint8_t));
+            iopack->io->send_data(&res, sizeof(uint8_t));
+        }
+
+        if (res_t ^ res) {
+            i++;
+            swap(arr[i], arr[j]);
+        }
+    }
+    swap(arr[i + 1], arr[high]);
+    return i + 1;
+}
+
+// Top-k select function: modifies arr in-place so top k elements are at arr[0..k-1]
+void Frequency::topKSelect(uint64_t *arr, int low, int high, int k, int bw) {
+    if (low <= high) {
+        int pi = partitionTopK(arr, low, high, bw);
+        int left_count = pi - low + 1;  // number of elements >= pivot
+
+        if (left_count == k) {
+            return; // top-k elements are arr[low..pi]
+        } else if (left_count > k) {
+            topKSelect(arr, low, pi - 1, k, bw); // top k are in left partition
+        } else {
+            topKSelect(arr, pi + 1, high, k - left_count, bw); // need more from right partition
+        }
+    }
+}
+
+
+void Frequency::shuffle_topk(uint64_t *res, uint64_t *data, int k, int num_data,
+                             int32_t bw_data, int32_t bw_res) {
+    // for (int i = 0; i < num_data; i++) {
+    //     cout << data[i] << " ";
+    // }
+    // cout << endl;
+    uint64_t *perm = new uint64_t[num_data]();
+    int bw_append = ceil(log2(num_data + 1));
+    int bw_tot = bw_data + bw_append;
+    random_permutation(perm, num_data);
+    // cout << "bw_tot = " << bw_tot << endl;
+    // cout << "bw_data = " << bw_data << endl;
+    // for (int i = 0; i < num_data; i++) {
+    //     cout << perm[i] << " ";
+    // }
+    // cout << endl;
+    if (party == ALICE) {
+        // element extend to make each element distinct.
+        for (int i = 0; i < num_data; i++) {
+            data[i] = (data[i] << bw_append);
+            data[i] += i;
+        }
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << perm[i] << " ";
+        // }
+        // cout << endl;
+        oblivious_shuffle(res, nullptr, data, num_data, bw_tot);
+        for (int i = 0; i < num_data; i++) {
+            data[i] = res[i];
+            data[i] &= (1ULL << bw_tot) - 1;
+        }
+
+        // cout << "----------------" << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << perm[i] << " ";
+        // }
+        // cout << endl;
+
+        // cout << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << (data[i] & ((1ULL << bw_append) - 1)) << " ";
+        // }
+        // cout << endl;
+
+        oblivious_shuffle_reverse(res, perm, nullptr, num_data, bw_tot);
+        plain_shuffle(perm, data, num_data);
+        for (int i = 0; i < num_data; i++) {
+            data[i] = data[i] + res[i];
+            data[i] &= (1ULL << bw_tot) - 1;
+        }
+
+        // cout << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << (data[i] & ((1ULL << bw_append) - 1)) << " ";
+        // }
+        // cout << endl;
+    } else {
+        for (int i = 0; i < num_data; i++) {
+            data[i] = data[i] << bw_append;
+        }
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << perm[i] << " ";
+        // }
+        // cout << endl;
+        oblivious_shuffle(res, perm, nullptr, num_data, bw_tot);
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << perm[i] << " ";
+        // }
+        // cout << endl;
+        // cout << "----------------" << endl;
+        plain_shuffle(perm, data, num_data);
+        for (int i = 0; i < num_data; i++) {
+            data[i] = data[i] + res[i];
+            data[i] &= (1ULL << bw_tot) - 1;
+        }
+
+
+        // cout << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << (res[i] & ((1ULL << bw_append) - 1)) << " ";
+        // }
+        // cout << endl;
+
+        oblivious_shuffle_reverse(res, nullptr, data, num_data, bw_tot);
+        for (int i = 0; i < num_data; i++) {
+            data[i] = res[i];
+            data[i] &= (1ULL << bw_tot) - 1;
+        }
+
+        // cout << endl;
+        // for (int i = 0; i < num_data; i++) {
+        //     cout << (data[i] & ((1ULL << bw_append) - 1)) << " ";
+        // }
+        // cout << endl;
+    }
+
+    xt->z_extend(num_data, data, data, bw_tot, bw_tot + 1); // for compare, we need one more bit
+    // cout << endl;
+    // for (int i = 0; i < num_data; i++) {
+    //     cout << (data[i] & ((1ULL << (bw_tot + 1)) - 1)) << " ";
+    // }
+    // cout << endl;
+    // cout << endl;
+    // for (int i = 0; i < num_data; i++) {
+    //     cout << (data[i] & ((1ULL << bw_tot) - 1)) << " ";
+    // }
+    // cout << endl;
+    // quick sort
+    topKSelect(data, 0, num_data - 1, k, bw_tot + 1);
+    // cout << endl;
+    // for (int i = 0; i < num_data; i++) {
+    //     cout << (data[i] & ((1ULL << bw_tot) - 1)) << " ";
+    // }
+    // cout << endl;
+    trunc->truncate_and_reduce(k, data, res, bw_append, bw_tot);
     // cout << endl;
     // for (int i = 0; i < num_data; i++) {
     //     cout << (res[i] & ((1ULL << bw_data) - 1)) << " ";

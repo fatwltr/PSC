@@ -61,6 +61,11 @@ public:
     int partition(uint64_t *arr, int low, int high, int bw);
     void quickSort(uint64_t *arr, int low, int high, int bw);
 
+    int partitionTopK(uint64_t *arr, int low, int high, int bw);
+    void topKSelect(uint64_t *arr, int low, int high, int k, int bw);
+    void shuffle_topk(uint64_t *res, uint64_t *data, int k, int num_data,
+                             int32_t bw_data, int32_t bw_res);
+
     void oblivious_shuffle(uint64_t *res, uint64_t *perm, uint64_t* data, int num_data, int32_t bw_data);
     void oblivious_shuffle_reverse(uint64_t *res, uint64_t *perm, uint64_t* data, int num_data, int32_t bw_data);
 
