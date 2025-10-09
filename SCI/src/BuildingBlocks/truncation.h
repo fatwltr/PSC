@@ -106,6 +106,17 @@ public:
       int32_t shift,
       // Input bitwidth
       int32_t bw);
+    void truncate_direct(
+      // Size of vector
+      int32_t dim,
+      // input vector
+      uint64_t *inA,
+      // output vector
+      uint64_t *outB,
+      // right shift amount
+      int32_t shift,
+      // Input bitwidth
+      int32_t bw);
 };
 
 #endif // TRUNCATION_H__

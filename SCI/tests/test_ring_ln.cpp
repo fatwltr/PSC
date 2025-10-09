@@ -113,7 +113,8 @@ int main(int argc, char **argv) {
     } else {
         uint64_t *x0 = new uint64_t[dim];
         iopackArr[0]->io->recv_data(x0, dim * sizeof(uint64_t));
-        // x[0] = 0x7d40cccc;
+        // x[0] = 4294967312;
+        // x[0] = (x[0] - x0[0]);
         // x[0] = 0b11000010;
 
         double log_min = std::log2(0.0001);

@@ -818,11 +818,11 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         endpoints[i] &= (1ULL << bw_res) - 1;
     }
 
-    cout << endl;
-    for (int i = 0; i < num_stand; i++) {
-        cout << endpoints[i] << " ";
-    }
-    cout << endl;
+    // cout << endl;
+    // for (int i = 0; i < num_stand; i++) {
+    //     cout << endpoints[i] << " ";
+    // }
+    // cout << endl;
 
     num_data += 1;
 
@@ -842,12 +842,12 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         endpoints[i] %= num_data;
     }
 
-    cout << num_data << " ";
-    cout << endl;
-    for (int i = 0; i < num_stand; i++) {
-        cout << endpoints[i] << " ";
-    }
-    cout << endl;
+    // cout << num_data << " ";
+    // cout << endl;
+    // for (int i = 0; i < num_stand; i++) {
+    //     cout << endpoints[i] << " ";
+    // }
+    // cout << endl;
 
     uint64_t mask_data = (bw_data == 64 ? -1 : ((1ULL << bw_data) - 1));
     uint64_t mask_res = (bw_res == 64 ? -1 : ((1ULL << bw_res) - 1));
@@ -1268,10 +1268,10 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
     uint64_t *temp_res = new uint64_t[num_data - 1]();
     // MUX, can batch   little gain as we set num_stand not too large
     for (int i = 0; i < num_stand; i++) {
-        aux->multiplexer_two_plain(interval_indicate[i], (i + 1), temp_res, num_data - 1, bw_res, bw_res);
+        aux->multiplexer_two_plain(interval_indicate[i], (i + 1), temp_res, num_data - 1, bw_data, bw_data);
         for (int j = 0; j < num_data - 1; j++) {
             res[j] += temp_res[j];
-            res[j] &= (1ULL << bw_res) - 1;
+            res[j] &= (1ULL << bw_data) - 1;
         }
     }
 
@@ -1774,9 +1774,6 @@ void Frequency::shuffle_sort(uint64_t *res, uint64_t *data, int num_stand, int n
 }
 
 
-
-
-
 // Partition function for top-k selection
 int Frequency::partitionTopK(uint64_t *arr, int low, int high, int bw) {
     uint64_t pivot = arr[high]; // choose last element as pivot
@@ -1788,7 +1785,7 @@ int Frequency::partitionTopK(uint64_t *arr, int low, int high, int bw) {
 
     for (int j = low; j < high; j++) {
         if (party == sci::ALICE) {
-            Za = (arr[j] - pivot) & mask_l;  // flip comparison to get top-k
+            Za = (arr[j] - pivot) & mask_l; // flip comparison to get top-k
             compare_with = Za & ((1ULL << (bw - 1)) - 1);
             aux->mill->compare(&res, &compare_with, 1, bw);
             uint8_t ba = Za < (1ULL << (bw - 1));
@@ -1819,7 +1816,7 @@ int Frequency::partitionTopK(uint64_t *arr, int low, int high, int bw) {
 void Frequency::topKSelect(uint64_t *arr, int low, int high, int k, int bw) {
     if (low <= high) {
         int pi = partitionTopK(arr, low, high, bw);
-        int left_count = pi - low + 1;  // number of elements >= pivot
+        int left_count = pi - low + 1; // number of elements >= pivot
 
         if (left_count == k) {
             return; // top-k elements are arr[low..pi]
@@ -1954,3 +1951,451 @@ void Frequency::shuffle_topk(uint64_t *res, uint64_t *data, int k, int num_data,
     // cout << endl;
     delete[] perm;
 }
+
+// tree
+void Frequency::count_kth(uint64_t *res, uint64_t *frequency, int k, int num_stand, int num_data,
+                          int32_t bw_data, int32_t bw_res) {
+    // cout << endl << "K: " << k << endl;
+    res[0] = 0;
+    bool flag = false;
+    if (num_stand % 2 == 0) {
+        num_stand += 1;
+        flag = true;
+    }
+    uint64_t *endpoints = new uint64_t[num_stand]();
+    uint64_t *endpoints_temp = new uint64_t[(num_stand + 1) / 2]();
+    uint64_t *endpoints_temp2 = new uint64_t[(num_stand + 1) / 2]();
+    endpoints[0] = frequency[0];
+    if (flag) {
+        for (int i = 1; i < num_stand - 1; i++) {
+            endpoints[i] = endpoints[i - 1] + frequency[i];
+            endpoints[i] &= (1ULL << bw_res) - 1;
+        }
+        xt->z_extend(num_stand - 1, endpoints, endpoints, bw_res, bw_res + 1);
+        endpoints[num_stand - 1] = endpoints[num_stand - 2];
+    } else {
+        for (int i = 1; i < num_stand; i++) {
+            endpoints[i] = endpoints[i - 1] + frequency[i];
+            endpoints[i] &= (1ULL << bw_res) - 1;
+        }
+        xt->z_extend(num_stand, endpoints, endpoints, bw_res, bw_res + 1);
+    }
+    bw_res += 1;
+
+    // cout << "endpoints: " << endl;
+    // for (int i = 0; i < num_stand; i++) {
+    //     cout << endpoints[i] << ", ";
+    // }
+    // cout << endl;
+
+    int depth = 0;
+    int size = num_stand;
+    int mid_idx = size / 2; // choose the middle element
+    uint64_t temp = 0;
+    uint64_t temptwo = 0;
+    uint8_t *temp_t = new uint8_t[num_stand]();
+    uint8_t temp_eq;
+    uint8_t *res_tree = new uint8_t[num_stand];
+    while (true) {
+        if (size <= 3) {
+            uint8_t *res_t = new uint8_t[size]();
+            uint8_t *res_eq = new uint8_t[size]();
+            uint8_t *res_t1 = new uint8_t[size]();
+            uint8_t *res_tb2a = new uint8_t[size]();
+            uint64_t *temp_t64 = new uint64_t[size]();
+            uint64_t *temp_t264 = new uint64_t[size]();
+
+
+            for (int i = 0; i < size; i++) {
+                if (party == ALICE) {
+                    temp_t64[i] = (endpoints[i] - k) & ((1ULL << (bw_res)) - 1);
+                    temp_t264[i] = temp_t64[i] & ((1ULL << (bw_res - 1)) - 1);
+                } else {
+                    temp_t64[i] = endpoints[i] & ((1ULL << (bw_res)) - 1);
+                    temp_t264[i] = (1ULL << (bw_res - 1)) - (temp_t64[i] & ((1ULL << (bw_res - 1)) - 1));
+                }
+            }
+
+            aux->mill_and_eq->compare_with_eq(res_t, res_eq, temp_t264, size, bw_res);
+
+            for (int i = 0; i < size; i++) {
+                if (party == ALICE) {
+                    res_t[i] ^= 1; // this used to reverse the cmp result to get wa <= t/2 - wb
+                    res_t[i] ^= (temp_t64[i] < (1ULL << (bw_res - 1)));
+                } else {
+                    res_t[i] ^= (temp_t64[i] < (1ULL << (bw_res - 1)));
+                }
+            }
+
+            for (int i = 0; i < size; i++) {
+                if (party == ALICE) {
+                    res_t[i] ^= 1;
+                    res_eq[i] ^= 1;
+                }
+            }
+
+            aux->AND(res_t, res_eq, res_t, size);
+
+            for (int i = 0; i < size; i++) {
+                if (party == ALICE) {
+                    res_t[i] ^= 1;
+                }
+            }
+
+            // cout << "---------------" << endl;
+            // for (int i = 0; i < size; i++) {
+            //     cout << (int) res_t[i] << ", ";
+            // }
+            // cout << endl;
+
+            if (party == ALICE) {
+                for (int i = 0; i < size - 1; i++) {
+                    res_t1[i] = res_t[i] ^ 1;
+                }
+                res_tb2a[0] = res_t[0];
+            } else {
+                for (int i = 0; i < size - 1; i++) {
+                    res_t1[i] = res_t[i];
+                }
+                res_tb2a[0] = res_t[0];
+            }
+
+
+            // res_t: k <= x0, k <= x1, k <= x2
+            // res_t1: k > x0, k > x2
+            aux->AND(res_t + 1, res_t1, res_tb2a + 1, size - 1);
+            // res_tb2a: k <= x0 ; x0 < k <= x1; x1 < k <= x2;
+
+            // cout << "---------------" << endl;
+            // for (int i = 0; i < size; i++) {
+            //     cout << (int) res_tb2a[i] << ", ";
+            // }
+            // cout << endl;
+
+            aux->B2A(res_tb2a, temp_t64, size, bw_res - 1); // bw_res should equals to the log(num_stand)
+
+            for (int i = 0; i < size; i++) {
+                res[0] += (temp_t64[i] * i);
+            }
+            res[0] &= (1ULL << (bw_res - 1)) - 1;
+            delete[] temp_t64;
+            delete[] temp_t264;
+            delete[] res_t;
+            delete[] res_t1;
+            delete[] res_tb2a;
+            break;
+        }
+
+        if (party == ALICE) {
+            temp = (endpoints[mid_idx] - k) & ((1ULL << (bw_res)) - 1);
+            temptwo = temp & ((1ULL << (bw_res - 1)) - 1);
+            aux->mill_and_eq->compare_with_eq(&res_tree[depth], &temp_eq, &temptwo, 1, bw_res);
+            res_tree[depth] ^= (temp < (1ULL << (bw_res - 1)));
+        } else {
+            temp = endpoints[mid_idx] & ((1ULL << (bw_res)) - 1);
+            temptwo = (1ULL << (bw_res - 1)) - (temp & ((1ULL << (bw_res - 1)) - 1));
+            aux->mill_and_eq->compare_with_eq(&res_tree[depth], &temp_eq, &temptwo, 1, bw_res);
+            res_tree[depth] ^= 1;
+            res_tree[depth] ^= (temp < (1ULL << (bw_res - 1)));
+        }
+
+        if (party == ALICE) {
+            res_tree[depth] ^= 1;
+            temp_eq ^= 1;
+        }
+
+        aux->AND(&res_tree[depth], &temp_eq, &res_tree[depth], 1);
+
+        if (party == ALICE) {
+            res_tree[depth] ^= 1;
+        }
+
+        // cout << endl;
+        // cout << "mid_value: " << endpoints[mid_idx] << endl;
+        // cout << "tree decision: " << (int) res_tree[depth] << endl;
+        // cout << endl;
+
+        // mux two array with length (size + 1) / 2
+        for (int j = 0; j < (size + 1) / 2; j++) {
+            endpoints_temp[j] = endpoints[size / 2 + j] - endpoints[j];
+        }
+        if (party == ALICE) {
+            std::fill(temp_t, temp_t + (size + 1) / 2, res_tree[depth]);
+        } else {
+            std::fill(temp_t, temp_t + (size + 1) / 2, res_tree[depth] ^ 1);
+            // we change for the convenience of array mux temp_t = 0 to choose the left half tree
+        }
+        // we here use k independent mux, which leads to k\lambda, but we can actually reduce it to \lambda
+        aux->multiplexer(temp_t, endpoints_temp, endpoints_temp2, (size + 1) / 2, bw_res, bw_res);
+
+        for (int j = 0; j < (size + 1) / 2; j++) {
+            endpoints[j] += endpoints_temp2[j];
+            endpoints[j] &= (1ULL << bw_res) - 1;
+        }
+        size = (size + 1) / 2;
+        if (size % 2 == 0) {
+            endpoints[size] = endpoints[size - 1];
+            size += 1;
+        }
+        mid_idx = size / 2;
+        depth += 1;
+
+        // cout << endl;
+        // for (int j = 0; j < size; j++) {
+        //     cout << endpoints[j] << ", ";
+        // }
+        // cout << endl;
+    }
+
+    // cout << endl;
+    // cout << "res[0]: " << res[0] << endl;
+
+    // temp2 used for the tree decision value append
+    uint64_t *temp2 = new uint64_t[depth]();
+    uint64_t *temp3 = new uint64_t[depth]();
+    int t = 0;
+    size = num_stand;
+    while (true) {
+        if (size <= 3) {
+            break;
+        }
+        temp2[t] = size / 2;
+        size = (size + 1) / 2;
+        if (size % 2 == 0) {
+            size += 1;
+        }
+        t += 1;
+    }
+
+    if (party == ALICE) {
+        for (int i1 = 0; i1 < depth; i1++) {
+            res_tree[i1] ^= 1;
+        }
+    }
+
+
+    // cout << endl << "append value: " << endl;
+    // for (int i1 = 0; i1 < depth; i1++) {
+    //     cout << temp2[i1] << ", ";
+    // }
+    // cout << endl;
+
+    // cout << endl << "res_tree: " << endl;
+    // for (int i1 = 0; i1 < depth; i1++) {
+    //     cout << (int) res_tree[i1] << ", ";
+    // }
+    // cout << endl;
+
+    aux->B2A(res_tree, temp3, depth, bw_res - 1);
+
+    // cout << endl << "temp3: " << endl;
+    // for (int i1 = 0; i1 < depth; i1++) {
+    //     cout << temp3[i1] << ", ";
+    // }
+    // cout << endl;
+
+    for (int i = 0; i < depth; i++) {
+        res[0] += (temp2[i] * temp3[i]);
+    }
+
+
+    res[0] &= (1ULL << (bw_res - 1)) - 1;
+
+
+    // cout << endl;
+    // cout << "res[0]: " << res[0] << endl;
+
+
+    delete [] endpoints;
+    delete [] endpoints_temp;
+    delete [] endpoints_temp2;
+    delete[] temp_t;
+    delete [] res_tree;
+    delete[] temp2;
+    delete[] temp3;
+}
+
+
+// linear
+// void Frequency::count_kth_linear(uint64_t *res, uint64_t *frequency, int k, int num_stand, int num_data,
+//                           int32_t bw_data, int32_t bw_res) {
+//     cout << endl << "K: " << k << endl;
+//     bool flag = false;
+//     if (num_stand % 2 == 0) {
+//         num_stand += 1;
+//         flag = true;
+//     }
+//     uint64_t *endpoints = new uint64_t[num_stand]();
+//     uint64_t *endpoints_temp = new uint64_t[(num_stand + 1) / 2]();
+//     uint64_t *endpoints_temp2 = new uint64_t[(num_stand + 1) / 2]();
+//     endpoints[0] = frequency[0];
+//     if (flag) {
+//         for (int i = 1; i < num_stand - 1; i++) {
+//             endpoints[i] = endpoints[i - 1] + frequency[i];
+//             endpoints[i] &= (1ULL << bw_res) - 1;
+//         }
+//         xt->z_extend(num_stand - 1, endpoints, endpoints, bw_res, bw_res + 1);
+//         endpoints[num_stand - 1] = endpoints[num_stand - 2];
+//     } else {
+//         for (int i = 1; i < num_stand; i++) {
+//             endpoints[i] = endpoints[i - 1] + frequency[i];
+//             endpoints[i] &= (1ULL << bw_res) - 1;
+//         }
+//         xt->z_extend(num_stand, endpoints, endpoints, bw_res, bw_res + 1);
+//     }
+//     bw_res += 1;
+//
+//     cout << "endpoints: " << endl;
+//     for (int i = 0; i < num_stand; i++) {
+//         cout << endpoints[i] << ", ";
+//     }
+//     cout << endl;
+//
+//     int depth = 0;
+//     int size = num_stand;
+//     int mid_idx = size / 2; // choose the middle element
+//     uint64_t temp = 0;
+//     uint8_t *temp_t = new uint8_t[num_stand]();
+//     uint8_t *res_tree = new uint8_t[num_stand];
+//     while (true) {
+//         if (size <= 3) {
+//             uint8_t *res_t = new uint8_t[size]();
+//             uint64_t *temp_t64 = new uint64_t[size]();
+//             for (int i = 0; i < size; i++) {
+//                 if (party == ALICE) {
+//                     temp_t64[i] = endpoints[i] - k;
+//                 } else {
+//                     temp_t64[i] = endpoints[i];
+//                 }
+//             }
+//             aux->wrap_computation(temp_t64, res_t, size, bw_res - 1);
+//             for (int i = 0; i < size; i++) {
+//                 if (party == ALICE) {
+//                     res_t[i] ^= ((endpoints[i] >> (bw_res - 1)) & 1);
+//                 } else {
+//                     res_t[i] ^= ((endpoints[i] >> (bw_res - 1)) & 1);
+//                     res_t[i] ^= 1;
+//                 }
+//             }
+//
+//
+//             cout << endl << "the last 3 elements: " << endl;
+//             for (int i = 0; i < size; i++) {
+//                 cout << (int)res_t[i] << ", ";
+//             }
+//             cout << endl;
+//
+//
+//             aux->B2A(res_t, temp_t64, size, bw_res); // bw_res should equals to the log(num_stand)
+//             for (int i = 0; i < size; i++) {
+//                 res[0] += temp_t64[i];
+//             }
+//             res[0] &= (1ULL << bw_res) - 1;
+//             delete[] temp_t64;
+//             delete[] res_t;
+//             break;
+//         }
+//         if (party == ALICE) {
+//             temp = endpoints[mid_idx] - k;
+//             aux->wrap_computation(&temp, &res_tree[depth], 1, bw_res - 1);
+//             res_tree[depth] ^= ((endpoints[mid_idx] >> (bw_res - 1)) & 1);
+//         } else {
+//             temp = endpoints[mid_idx];
+//             aux->wrap_computation(&temp, &res_tree[depth], 1, bw_res - 1);
+//             res_tree[depth] ^= ((endpoints[mid_idx] >> (bw_res - 1)) & 1);
+//             res_tree[depth] ^= 1;
+//         }
+//
+//         cout << endl;
+//         cout << "mid_value: " << endpoints[mid_idx] << endl;
+//         cout << "tree decision: " << (int)res_tree[depth] << endl;
+//         cout << endl;
+//
+//         // mux two array with length (size + 1) / 2
+//         for (int j = 0; j < (size + 1) / 2; j++) {
+//             endpoints_temp[j] = endpoints[size / 2 + j] - endpoints[j];
+//         }
+//         if (party == ALICE) {
+//             std::fill(temp_t, temp_t + (size + 1) / 2, res_tree[depth]);
+//         } else {
+//             std::fill(temp_t, temp_t + (size + 1) / 2, res_tree[depth] ^ 1);
+//         }
+//         aux->multiplexer(temp_t, endpoints_temp, endpoints_temp2, (size + 1) / 2, bw_res, bw_res);
+//
+//         for (int j = 0; j < (size + 1) / 2; j++) {
+//             endpoints[j] += endpoints_temp2[j];
+//             endpoints[j] &= (1ULL << bw_res) - 1;
+//         }
+//         size = (size + 1) / 2;
+//         if (size % 2 == 0) {
+//             endpoints[size] = endpoints[size - 1];
+//             size += 1;
+//         }
+//         mid_idx = size / 2;
+//         depth += 1;
+//
+//         cout << endl;
+//         for (int j = 0; j < size; j++) {
+//             cout << endpoints[j] << ", ";
+//         }
+//         cout << endl;
+//     }
+//
+//     // temp2 used for the tree decision value append
+//     uint64_t *temp2 = new uint64_t[depth]();
+//     int t = 0;
+//     size = num_stand;
+//     while (true) {
+//         if (size <= 3) {
+//             break;
+//         }
+//         temp2[t] = size / 2;
+//         size = (size + 1) / 2;
+//         if (size % 2 == 0) {
+//             size += 1;
+//         }
+//         t += 1;
+//     }
+//
+//     if (party == ALICE) {
+//         for (int i1 = 0; i1 < depth; i1++) {
+//             res_tree[i1] ^= 1;
+//         }
+//     }
+//
+//
+//     cout << endl << "append value: " << endl;
+//     for (int i1 = 0; i1 < depth; i1++) {
+//         cout << temp2[i1] << ", ";
+//     }
+//     cout << endl;
+//
+//     cout << endl << "res_tree: " << endl;
+//     for (int i1 = 0; i1 < depth; i1++) {
+//         cout << (int) res_tree[i1] << ", ";
+//     }
+//     cout << endl;
+//
+//     aux->multiplexer_two_plain(res_tree, temp2, temp2, depth, bw_res, bw_res);
+//     for (int i = 0; i < depth; i++) {
+//         res[0] += temp2[i];
+//     }
+//
+//     if (party == ALICE) {
+//         res[0] -= 1;
+//     }
+//
+//     res[0] &= (1ULL << bw_res) - 1;
+//
+//
+//     cout << endl;
+//     cout << "res[0]: " << res[0] << endl;
+//
+//
+//     delete [] endpoints;
+//     delete [] endpoints_temp;
+//     delete [] endpoints_temp2;
+//     delete[] temp_t;
+//     delete [] res_tree;
+//     delete[] temp2;
+// }

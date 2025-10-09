@@ -14,7 +14,6 @@ using namespace std;
 using namespace sci;
 
 int party = 0, port = 8000;
-int eq = 0;
 string address = "127.0.0.1";
 int num_data = 8;
 int num_stand = 4;
@@ -22,7 +21,6 @@ int num_stand = 4;
 int main(int argc, char **argv) {
     ArgMapping amap;
     amap.arg("r", party, "Role of party: ALICE = 1; BOB = 2");
-    amap.arg("eq", eq, "eq=1 use count_eq");
     amap.arg("p", port, "Port Number");
     amap.arg("nd", num_data, "Number of elements");
     amap.arg("ns", num_stand, "Number of stands, or the k in shuffleTopk");
@@ -50,8 +48,7 @@ int main(int argc, char **argv) {
     auto start = clock_start();
     uint64_t comm = iopack->get_comm();
 
-    frequency->shuffle_sort(res, data, num_stand, num_data, bw_data, bw_res);
-    // frequency->shuffle_topk(res, data, num_stand, num_data, bw_data, bw_res); // the res here should be num_data as the code inner shuffle_topk reuse the res.
+    frequency->shuffle_topk(res, data, num_data / 4, num_data, bw_data, bw_res); // the res here should be num_data as the code inner shuffle_topk reuse the res.
 
     comm = iopack->get_comm() - comm;
     long long t = time_from(start);

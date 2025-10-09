@@ -1098,8 +1098,7 @@ void AuxProtocols::nMinus1OUTNOT_batch_reverse(block128 *seed, uint64_t batch_si
             delete[] layer_OT_sum_seed[i];
         }
         delete[] layer_OT_sum_seed;
-    }
-    else {
+    } else {
         auto *r = new bool[tree_depth * batch_size];
         auto *layer_OT_sum_seed = new block128[tree_depth * batch_size];
         for (int i = 1; i <= tree_depth; i++) {
@@ -1122,7 +1121,8 @@ void AuxProtocols::nMinus1OUTNOT_batch_reverse(block128 *seed, uint64_t batch_si
             step_size_last_layer = 2 * step_size;
             points_last_layer = points_this_layer / 2;
             skip_index = r[0 + k * tree_depth] ^ 1;
-            batch_GGM_leaves[k * leaves_size + r[0 + k * tree_depth] * step_size] = layer_OT_sum_seed[0 + k * tree_depth];
+            batch_GGM_leaves[k * leaves_size + r[0 + k * tree_depth] * step_size] = layer_OT_sum_seed[
+                0 + k * tree_depth];
             for (int i = 2; i <= tree_depth; i++) {
                 points_this_layer *= 2;
                 step_size = leaves_size / points_this_layer;
@@ -1150,7 +1150,8 @@ void AuxProtocols::nMinus1OUTNOT_batch_reverse(block128 *seed, uint64_t batch_si
                     temp = _mm_xor_si128(
                         temp, batch_GGM_leaves[k * leaves_size + (j + r[k * tree_depth + i - 1]) * step_size]);
                 }
-                batch_GGM_leaves[k * leaves_size + skip_index * step_size_last_layer + step_size * r[k * tree_depth + i - 1]]
+                batch_GGM_leaves[k * leaves_size + skip_index * step_size_last_layer + step_size * r[
+                                     k * tree_depth + i - 1]]
                         = temp;
                 skip_index = (skip_index << 1) + (r[k * tree_depth + i - 1] ^ 1);
 
@@ -1248,8 +1249,7 @@ void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint
             delete[] layer_OT_sum_seed[i];
         }
         delete[] layer_OT_sum_seed;
-    }
-    else {
+    } else {
         auto *r = new bool[tree_depth * batch_size];
         auto *layer_OT_sum_seed = new block128[tree_depth * batch_size];
         for (int i = 1; i <= tree_depth; i++) {
@@ -1272,7 +1272,8 @@ void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint
             step_size_last_layer = 2 * step_size;
             points_last_layer = points_this_layer / 2;
             skip_index = r[0 + k * tree_depth] ^ 1;
-            batch_GGM_leaves[k * leaves_size + r[0 + k * tree_depth] * step_size] = layer_OT_sum_seed[0 + k * tree_depth];
+            batch_GGM_leaves[k * leaves_size + r[0 + k * tree_depth] * step_size] = layer_OT_sum_seed[
+                0 + k * tree_depth];
             for (int i = 2; i <= tree_depth; i++) {
                 points_this_layer *= 2;
                 step_size = leaves_size / points_this_layer;
@@ -1300,7 +1301,8 @@ void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint
                     temp = _mm_xor_si128(
                         temp, batch_GGM_leaves[k * leaves_size + (j + r[k * tree_depth + i - 1]) * step_size]);
                 }
-                batch_GGM_leaves[k * leaves_size + skip_index * step_size_last_layer + step_size * r[k * tree_depth + i - 1]]
+                batch_GGM_leaves[k * leaves_size + skip_index * step_size_last_layer + step_size * r[
+                                     k * tree_depth + i - 1]]
                         = temp;
                 skip_index = (skip_index << 1) + (r[k * tree_depth + i - 1] ^ 1);
 
@@ -1548,8 +1550,7 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
         delete[] x_packed;
         delete[] a;
         delete[] b;
-    }
-    else {
+    } else {
         nMinus1OUTNOT_batch(seeds, batch_size, length, offset);
         // #ifndef NDEBUG
         // std::cout << std::endl;
@@ -1933,8 +1934,7 @@ void AuxProtocols::msnzb_sci_tree(uint64_t *x, uint64_t *msnzb_index, int32_t bw
 
 
 void AuxProtocols::msnzb_one_hot_tree(uint64_t *x, uint8_t *one_hot_vector,
-                                      int32_t bw_x, int32_t size,
-                                      int32_t digit_size) {
+                                      int32_t bw_x, int32_t size, int32_t digit_size) {
     uint64_t mask_x = (bw_x == 64 ? -1 : ((1ULL << bw_x) - 1));
     int msnzb_index_bits = ceil(log2(bw_x));
     uint64_t msnzb_index_mask = (1ULL << msnzb_index_bits) - 1;
@@ -2000,4 +2000,52 @@ void AuxProtocols::msnzb_one_hot_tree(uint64_t *x, uint8_t *one_hot_vector,
     }
     delete[] xor_mask;
     delete[] msnzb_index;
+}
+
+// this version is aimed to support the result of the k-th element (only once runtime)
+// sel: array with only one element
+void AuxProtocols::multiplexer_batch_special(uint8_t *sel, uint64_t *x, uint64_t *y,
+                                             int32_t size, int32_t bw_x, int32_t bw_y) {
+    assert(bw_x <= 64 && bw_y <= 64 && bw_y <= bw_x);
+    uint64_t mask_x = (bw_x == 64 ? -1 : ((1ULL << bw_x) - 1));
+    uint64_t mask_y = (bw_y == 64 ? -1 : ((1ULL << bw_y) - 1));
+
+    uint64_t *corr_data = new uint64_t[size];
+    uint64_t *data_S = new uint64_t[size];
+    uint64_t *data_R = new uint64_t[size];
+
+    // y = (sel_0 \xor sel_1) * (x_0 + x_1)
+    // y = (sel_0 + sel_1 - 2*sel_0*sel_1)*x_0 + (sel_0 + sel_1 -
+    // 2*sel_0*sel_1)*x_1 y = [sel_0*x_0 + sel_1*(x_0 - 2*sel_0*x_0)]
+    //     + [sel_1*x_1 + sel_0*(x_1 - 2*sel_1*x_1)]
+    for (int i = 0; i < size; i++) {
+        corr_data[i] = (x[i] * (1 - 2 * uint64_t(sel[0]))) & mask_y;
+    }
+    // cout << endl;
+    // cout << "------------------" << endl;
+    // the following usage of batched cot is wrong.
+    {
+        if (omp_get_thread_num() == 1) {
+            if (party == sci::ALICE) {
+                otpack->iknp_reversed->recv_batched_cot(data_R, (bool *) sel, {bw_y}, size, size);
+            } else {
+                // party == sci::BOB
+                otpack->iknp_reversed->send_batched_cot(data_S, corr_data, {bw_y}, size, size);
+            }
+        } else {
+            if (party == sci::ALICE) {
+                otpack->iknp_straight->send_batched_cot(data_S, corr_data, {bw_y}, size, size);
+            } else {
+                // party == sci::BOB
+                otpack->iknp_straight->recv_batched_cot(data_R, (bool *) sel, {bw_y}, size, size);
+            }
+        }
+    }
+    for (int i = 0; i < size; i++) {
+        y[i] = ((x[i] * uint64_t(sel[0]) + data_R[i] - data_S[i]) & mask_y);
+    }
+
+    delete[] corr_data;
+    delete[] data_S;
+    delete[] data_R;
 }

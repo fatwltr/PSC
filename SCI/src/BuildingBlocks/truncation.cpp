@@ -302,3 +302,41 @@ void Truncation::truncate_and_reduce(int32_t dim, uint64_t *inA, uint64_t *outB,
 
   return;
 }
+
+void Truncation::truncate_direct(int32_t dim, uint64_t *inA, uint64_t *outB,
+                                     int32_t shift, int32_t bw) {
+  if (shift == 0) {
+    memcpy(outB, inA, sizeof(uint64_t) * dim);
+    return;
+  }
+  assert((bw - shift) > 0 && "Truncation shouldn't truncate the full bitwidth");
+
+  uint64_t mask_bw = (bw == 64 ? -1 : ((1ULL << bw) - 1));
+  uint64_t mask_shift = (shift == 64 ? -1 : ((1ULL << shift) - 1));
+  uint64_t mask_out = ((bw - shift) == 64 ? -1 : ((1ULL << (bw - shift)) - 1));
+
+  // uint64_t *inA_lower = new uint64_t[dim];
+  // uint8_t *wrap = new uint8_t[dim];
+  // for (int i = 0; i < dim; i++) {
+  //   inA_lower[i] = inA[i] & mask_shift;
+  // }
+
+
+
+  // this->aux->wrap_computation(inA_lower, wrap, dim, shift);
+
+  // uint64_t *arith_wrap = new uint64_t[dim];
+  // this->aux->B2A(wrap, arith_wrap, dim, (bw - shift));
+  // cout << "%%%%%%: " << (inA[0]) << endl;
+  // cout << "&&&&&&: " << (inA[0] >> shift) << endl;
+
+  for (int i = 0; i < dim; i++) {
+    outB[i] = (inA[i] >> shift) & mask_out;
+  }
+
+  // delete[] inA_lower;
+  // delete[] wrap;
+  // delete[] arith_wrap;
+
+  return;
+}
