@@ -852,7 +852,8 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
     uint64_t mask_data = (bw_data == 64 ? -1 : ((1ULL << bw_data) - 1));
     uint64_t mask_res = (bw_res == 64 ? -1 : ((1ULL << bw_res) - 1));
     auto *seeds = new block128[num_stand * num_data * 2]();
-    auto *prg = new PRG128[num_stand * num_data * 2]();
+    // auto *prg = new PRG128[num_stand * num_data * 2]();
+    PRG128 prg;
     auto **x = new uint8_t *[num_stand];
     for (int i = 0; i < num_stand; i++) {
         x[i] = new uint8_t[num_data * 2]();
@@ -865,7 +866,7 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
     for (int i = 0; i < num_stand; i++) {
         interval_indicate[i] = new uint8_t[num_data]();
     }
-    int save_memory = 8;
+    int save_memory = num_data * 2 > 2048 ? 2048 : num_data * 2;
     if (party == sci::ALICE) {
         // set the offset directly in the index
         for (int i = 0; i < num_stand; i++) {
@@ -899,16 +900,17 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
             b[i] = new uint8_t[num_data * 2]();
         }
 
-        for (int i = 0; i < num_stand; i++) {
-            for (int j = 0; j < num_data * 2; j++) {
-                prg[i * num_data * 2 + j].reseed(&seeds[i * num_data * 2 + j]);
-            }
-        }
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data * 2; j++) {
+        //         prg[i * num_data * 2 + j].reseed(&seeds[i * num_data * 2 + j]);
+        //     }
+        // }
 
         for (int i = 0; i < num_stand; i++) {
             for (int k = 0; k < (num_data * 2 / save_memory); k++) {
                 for (int j = 0; j < num_data * 2; j++) {
-                    prg[i * num_data * 2 + j].random_bool((bool *) shift_translate[j], save_memory);
+                    prg.reseed(&seeds[i * num_data * 2 + j]);
+                    prg.random_bool((bool *) shift_translate[j], save_memory);
                 }
 
                 // cout << "shift_translate" << endl;
@@ -932,7 +934,8 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
             }
             int k = (num_data * 2 / save_memory);
             for (int j = 0; j < num_data * 2; j++) {
-                prg[i * num_data * 2 + j].random_bool((bool *) shift_translate[j], last);
+                prg.reseed(&seeds[i * num_data * 2 + j]);
+                prg.random_bool((bool *) shift_translate[j], last);
             }
             // cout << "shift_translate" << endl;
             // for (int j = 0; j < num_data * 2; j++) {
@@ -1047,7 +1050,8 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         delete[] mux_choice;
         delete[] a;
         delete[] b;
-    } else {
+    }
+    else {
         this->aux->nMinus1OUTNOT_batch(seeds, num_stand, 2 * num_data, endpoints);
 
         // cout << endl;
@@ -1069,16 +1073,17 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
             c[i] = new uint8_t[num_data * 2]();
         }
 
-        for (int i = 0; i < num_stand; i++) {
-            for (int j = 0; j < num_data * 2; j++) {
-                prg[i * num_data * 2 + j].reseed(&seeds[i * num_data * 2 + j]);
-            }
-        }
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data * 2; j++) {
+        //         prg.reseed(&seeds[i * num_data * 2 + j]);
+        //     }
+        // }
 
         for (int i = 0; i < num_stand; i++) {
             for (int k = 0; k < (num_data * 2 / save_memory); k++) {
                 for (int j = 0; j < num_data * 2; j++) {
-                    prg[i * num_data * 2 + j].random_bool((bool *) shift_translate[j], save_memory);
+                    prg.reseed(&seeds[i * num_data * 2 + j]);
+                    prg.random_bool((bool *) shift_translate[j], save_memory);
                 }
                 // cout << "shift_translate" << endl;
                 // for (int j = 0; j < num_data * 2; j++) {
@@ -1105,7 +1110,8 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
                     std::fill(shift_translate[j], shift_translate[j] + save_memory, 0);
                     continue;
                 }
-                prg[i * num_data * 2 + j].random_bool((bool *) shift_translate[j], last);
+                prg.reseed(&seeds[i * num_data * 2 + j]);
+                prg.random_bool((bool *) shift_translate[j], last);
             }
             // cout << "shift_translate" << endl;
             // for (int j = 0; j < num_data * 2; j++) {
@@ -1287,7 +1293,7 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
     delete[] t;
     delete[] appendix;
     delete[] seeds;
-    delete[] prg;
+    // delete[] prg;
     for (int i = 0; i < num_stand; i++) {
         delete[] x[i];
         delete[] uniShr[i];

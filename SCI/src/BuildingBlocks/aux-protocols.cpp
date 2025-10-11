@@ -1494,11 +1494,138 @@ void AuxProtocols::uniShare_naive_bool(uint8_t *uniShr, int length, const uint64
     delete[] x;
 }
 
+// can use but not memory-frendly !!!
+
+// void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, int length, uint64_t *offset) {
+//     auto *seeds = new block128[length * batch_size]();
+//     PRG128 prg;
+//     auto *x = new uint8_t[length * batch_size]();
+//     if (party == sci::ALICE) {
+//         // set the offset directly in the index
+//         for (int i = 0; i < batch_size; i++) {
+//             x[offset[i] + i * length] = 1;
+//         }
+//         nMinus1OUTNOT_batch(seeds, batch_size, length, nullptr);
+//         // std::cout << std::endl;
+//         // for (int ii = 0; ii < length; ii++) {
+//         //     print_block(seeds[ii]);
+//         // }
+//         // std::cout << std::endl;
+//
+//         // generate the shift translation shares
+//         auto **shift_translate = new uint8_t *[length * batch_size];
+//         auto *a = new uint8_t[length * batch_size]();
+//         auto *b = new uint8_t[length * batch_size]();
+//         uint8_t *x_packed = new uint8_t[(length * batch_size + 7) / 8]();
+//         for (int k = 0; k < batch_size; k++) {
+//             for (int i = 0; i < length; i++) {
+//                 shift_translate[i + k * length] = new uint8_t[length]();
+//                 prg.reseed(&seeds[i + k * length]);
+//                 prg.random_bool((bool *) shift_translate[i + k * length], length);
+//             }
+//             for (int i = 0; i < length; i++) {
+//                 for (int j = 0; j < length; j++) {
+//                     a[j + k * length] ^= shift_translate[i + k * length][j];
+//                     b[i + k * length] ^= shift_translate[(i - j + length) % length + k * length][j];
+//                 }
+//             }
+//         }
+//         memcpy(uniShr, b, batch_size * length * sizeof(uint8_t));
+//         for (int i = 0; i < length * batch_size; i++) {
+//             x[i] = x[i] ^ a[i];
+//         }
+//
+//         pack_bits(x, x_packed, length * batch_size);
+//         iopack->io->send_data(x_packed, ((length * batch_size + 7) / 8) * sizeof(uint8_t));
+//
+//         // std::cout << std::endl;
+//         // for (int i = 0; i < length; i++) {
+//         //     std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b[length + i]) << " ";
+//         // }
+//         // std::cout << std::endl;
+//
+//         for (int i = 0; i < length * batch_size; i++) {
+//             delete[] shift_translate[i];
+//         }
+//         delete[] shift_translate;
+//         delete[] x_packed;
+//         delete[] a;
+//         delete[] b;
+//     } else {
+//         nMinus1OUTNOT_batch(seeds, batch_size, length, offset);
+//         // #ifndef NDEBUG
+//         // std::cout << std::endl;
+//         // for (int ii = 0; ii < length; ii++) {
+//         //     print_block(seeds[ii]);
+//         // }
+//         // std::cout << std::endl;
+//         // #endif
+//         // generate the shift translation shares
+//         auto **shift_translate = new uint8_t *[length * batch_size]();
+//         auto *c = new uint8_t[length * batch_size]();
+//         for (int k = 0; k < batch_size; k++) {
+//             for (int i = 0; i < length; i++) {
+//                 shift_translate[i + k * length] = new uint8_t[length]();
+//                 if (i == offset[k]) {
+//                     continue;
+//                 }
+//                 prg.reseed(&seeds[i + k * length]);
+//                 prg.random_bool(reinterpret_cast<bool *>(shift_translate[i + k * length]), length);
+//             }
+//             for (int i = 0; i < length; i++) {
+//                 for (int j = 0; j < length; j++) {
+//                     c[i + k * length] ^= shift_translate[(i - j + length) % length + k * length][j];
+//                     c[(j + offset[k] + length) % length + k * length] ^= shift_translate[i + k * length][j];
+//                 }
+//             }
+//         }
+//
+//         auto *xMa = new uint8_t[length * batch_size]();
+//         auto *shift_xMa = new uint8_t[length * batch_size]();
+//         auto *xMa_packed = new uint8_t[(length * batch_size + 7) / 8];
+//         iopack->io->recv_data(xMa_packed, ((length * batch_size + 7) / 8) * sizeof(uint8_t));
+//         unpack_bits(xMa_packed, xMa, length * batch_size);
+//         delete[] xMa_packed;
+//
+//         for (int k = 0; k < batch_size; k++) {
+//             std::memcpy(k * length + shift_xMa, k * length + xMa + length - offset[k], offset[k]);
+//             std::memcpy(k * length + shift_xMa + offset[k], k * length + xMa, length - offset[k]);
+//         }
+//         for (int k = 0; k < batch_size; k++) {
+//             for (int i = 0; i < length; i++) {
+//                 uniShr[k * length + i] = c[k * length + i] ^ shift_xMa[k * length + i];
+//             }
+//         }
+//
+//
+//         // std::cout << std::endl;
+//         // std::cout << "the shifted vector" << std::endl;
+//         // for (int i = 0; i < length; i++) {
+//         //     std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(uniShr[length + i]) << " ";
+//         // }
+//         // std::cout << std::endl;
+//
+//         for (int i = 0; i < length * batch_size; i++) {
+//             delete[] shift_translate[i];
+//         }
+//         delete[] shift_translate;
+//         delete[] c;
+//         delete[] xMa;
+//         delete[] shift_xMa;
+//     }
+//     delete[] seeds;
+//     delete[] x;
+// }
 
 void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, int length, uint64_t *offset) {
     auto *seeds = new block128[length * batch_size]();
+    // auto *prg = new PRG128[length * batch_size]();
     PRG128 prg;
     auto *x = new uint8_t[length * batch_size]();
+    int save_memory = length * batch_size * length > 9ULL * 1024 * 1024 * 1024 ? 8ULL * 1024 * 1024 * 1024 / (batch_size * length) : length;
+    save_memory = save_memory > length ? length : save_memory;
+
+    cout << "save memory: " << save_memory << endl;
     if (party == sci::ALICE) {
         // set the offset directly in the index
         for (int i = 0; i < batch_size; i++) {
@@ -1513,22 +1640,67 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
 
         // generate the shift translation shares
         auto **shift_translate = new uint8_t *[length * batch_size];
-        auto *a = new uint8_t[length * batch_size]();
-        auto *b = new uint8_t[length * batch_size]();
-        uint8_t *x_packed = new uint8_t[(length * batch_size + 7) / 8]();
         for (int k = 0; k < batch_size; k++) {
             for (int i = 0; i < length; i++) {
-                shift_translate[i + k * length] = new uint8_t[length]();
-                prg.reseed(&seeds[i + k * length]);
-                prg.random_bool((bool *) shift_translate[i + k * length], length);
+                shift_translate[i + k * length] = new uint8_t[save_memory]();
+                // prg[i + k * length].reseed(&seeds[i + k * length]);
             }
-            for (int i = 0; i < length; i++) {
+        }
+        auto *a = new uint8_t[length * batch_size]();
+        auto *b = new uint8_t[length * batch_size]();
+
+        uint8_t *x_packed = new uint8_t[(length * batch_size + 7) / 8]();
+
+
+        // for (int k = 0; k < batch_size; k++) {
+        for (int i = 0; i < batch_size; i++) {
+            // for (int kk = 0; kk < (length / save_memory); kk++) {
+            for (int k = 0; k < (length / save_memory); k++) {
+                // for (int i = 0; i < length; i++) {
                 for (int j = 0; j < length; j++) {
-                    a[j + k * length] ^= shift_translate[i + k * length][j];
-                    b[i + k * length] ^= shift_translate[(i - j + length) % length + k * length][j];
+                    // prg.random_bool((bool *) shift_translate[i + k * length], length);
+                    prg.reseed(&seeds[j + i * length]);
+                    prg.random_bool((bool *) shift_translate[j + i * length], save_memory);
+                }
+
+                // for (int i = 0; i < length; i++) {
+                for (int j = 0; j < length; j++) {
+                    // for (int j = 0; j < length; j++) {
+                    for (int l = 0; l < save_memory; l++) {
+                        // a[j + k * length] ^= shift_translate[i + k * length][j];
+                        a[l + k * save_memory + i * length] ^= shift_translate[j + i * length][l];
+                        // b[i + k * length] ^= shift_translate[(i - j + length) % length + k * length][j];
+                        b[j + i * length] ^= shift_translate[(j - l - k * save_memory + length) % length + i * length][
+                            l];
+                    }
+                }
+            }
+
+            int last = length % save_memory;
+            if (last == 0) {
+                continue;
+            }
+            int k = (length / save_memory);
+            for (int j = 0; j < length; j++) {
+                prg.reseed(&seeds[i * length + j]);
+                prg.random_bool((bool *) shift_translate[j], last);
+            }
+            // cout << "shift_translate" << endl;
+            // for (int j = 0; j < num_data * 2; j++) {
+            //     for (int l = 0; l < last; l++) {
+            //         cout << (int) shift_translate[j][l] << " ";
+            //     }
+            //     cout << endl;
+            // }
+            for (int j = 0; j < length; j++) {
+                for (int l = 0; l < last; l++) {
+                    a[i * length + l + k * save_memory] ^= shift_translate[j + i * length][l];
+                    b[j + i * length] ^= shift_translate[(j - l - k * save_memory + length) % length + i * length][
+                        l];
                 }
             }
         }
+
         memcpy(uniShr, b, batch_size * length * sizeof(uint8_t));
         for (int i = 0; i < length * batch_size; i++) {
             x[i] = x[i] ^ a[i];
@@ -1561,23 +1733,66 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
         // #endif
         // generate the shift translation shares
         auto **shift_translate = new uint8_t *[length * batch_size]();
-        auto *c = new uint8_t[length * batch_size]();
         for (int k = 0; k < batch_size; k++) {
             for (int i = 0; i < length; i++) {
-                shift_translate[i + k * length] = new uint8_t[length]();
-                if (i == offset[k]) {
+                shift_translate[i + k * length] = new uint8_t[save_memory]();
+                // prg[i + k * length].reseed(&seeds[i + k * length]);
+            }
+        }
+        auto *c = new uint8_t[length * batch_size]();
+
+
+        // for (int k = 0; k < batch_size; k++) {
+        for (int i = 0; i < batch_size; i++) {
+            for (int k = 0; k < (length / save_memory); k++) {
+                // for (int i = 0; i < length; i++) {
+                for (int j = 0; j < length; j++) {
+                    // if (i == offset[k]) {
+                    if (j == offset[i]) {
+                        continue;
+                    }
+                    // prg.random_bool(reinterpret_cast<bool *>(shift_translate[i + k * length]), length);
+                    prg.reseed(&seeds[i * length + j]);
+                    prg.random_bool(reinterpret_cast<bool *>(shift_translate[j + i * length]), save_memory);
+                }
+                // for (int i = 0; i < length; i++) {
+                for (int j = 0; j < length; j++) {
+                    // for (int j = 0; j < length; j++) {
+                    for (int l = 0; l < save_memory; l++) {
+                        // c[i + k * length] ^= shift_translate[(i - j + length) % length + k * length][j];
+                        c[j + i * length] ^= shift_translate[(j - l - k * save_memory + length) % length + i * length][l];
+                        // c[(j + offset[k] + length) % length + k * length] ^= shift_translate[i + k * length][j];
+                        c[(l + k * save_memory + offset[i] + length) % length + i * length] ^= shift_translate[j + i * length][l];
+                    }
+                }
+            }
+            int last = length % save_memory;
+            if (last == 0) {
+                continue;
+            }
+            int k = (length / save_memory);
+            for (int j = 0; j < length; j++) {
+                if (j == offset[i]) {
+                    std::fill(shift_translate[j], shift_translate[j] + save_memory, 0);
                     continue;
                 }
-                prg.reseed(&seeds[i + k * length]);
-                prg.random_bool(reinterpret_cast<bool *>(shift_translate[i + k * length]), length);
+                prg.reseed(&seeds[i * length + j]);
+                prg.random_bool((bool *) shift_translate[j], last);
             }
-            for (int i = 0; i < length; i++) {
-                for (int j = 0; j < length; j++) {
-                    c[i + k * length] ^= shift_translate[(i - j + length) % length + k * length][j];
-                    c[(j + offset[k] + length) % length + k * length] ^= shift_translate[i + k * length][j];
+
+            for (int j = 0; j < length; j++) {
+                for (int l = 0; l < last; l++) {
+                    c[j + i * length] ^= shift_translate[(j - l - k * save_memory + length) % length + i * length][l];
+                    c[(l + k * save_memory + offset[i] + length) % length + i * length] ^= shift_translate[j + i * length][l];
                 }
             }
         }
+
+        for (int i = 0; i < length * batch_size; i++) {
+            delete[] shift_translate[i];
+        }
+        delete[] shift_translate;
+
 
         auto *xMa = new uint8_t[length * batch_size]();
         auto *shift_xMa = new uint8_t[length * batch_size]();
@@ -1604,16 +1819,13 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
         // }
         // std::cout << std::endl;
 
-        for (int i = 0; i < length * batch_size; i++) {
-            delete[] shift_translate[i];
-        }
-        delete[] shift_translate;
         delete[] c;
         delete[] xMa;
         delete[] shift_xMa;
     }
     delete[] seeds;
     delete[] x;
+    // delete[] prg;
 }
 
 

@@ -70,14 +70,14 @@ int main(int argc, char **argv) {
     //     uint64_t *t_data = new uint64_t[num_data];
     //     iopack->io->recv_data(t_data, num_data * sizeof(uint64_t));
     //     iopack->io->recv_data(t_res, num_stand * sizeof(uint64_t));
-    //     for (int i = 0; i < num_data; ++i) {
-    //         cout << t_data[i] << " ";
-    //     }
-    //     cout << endl;
-    //     for (int i = 0; i < num_data; ++i) {
-    //         cout << data[i] << " ";
-    //     }
-    //     cout << endl;
+    //     // for (int i = 0; i < num_data; ++i) {
+    //     //     cout << t_data[i] << " ";
+    //     // }
+    //     // cout << endl;
+    //     // for (int i = 0; i < num_data; ++i) {
+    //     //     cout << data[i] << " ";
+    //     // }
+    //     // cout << endl;
     //     for (int i = 0; i < num_stand; ++i) {
     //         t_res[i] += res[i];
     //         t_res[i] &= (1ULL << bw_res) - 1;
