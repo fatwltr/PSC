@@ -1621,16 +1621,20 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
     auto *seeds = new block128[length * batch_size]();
     // auto *prg = new PRG128[length * batch_size]();
     PRG128 prg;
-    auto *x = new uint8_t[length * batch_size]();
-    int save_memory = length * batch_size * length > 9ULL * 1024 * 1024 * 1024 ? 8ULL * 1024 * 1024 * 1024 / (batch_size * length) : length;
-    save_memory = save_memory > length ? length : save_memory;
+    // int save_memory = length * batch_size * length > 11ULL * 1024 * 1024 * 1024 ? 11ULL * 1024 * 1024 * 1024 / (batch_size * length) : length;
+    // save_memory = save_memory > length ? length : save_memory;
+
+    uint64_t mem_limit = batch_size > 5000 ? 8ULL * 1024 * 1024 * 1024 : 11ULL * 1024 * 1024 * 1024;  // 11 GiB
+    uint64_t total = static_cast<uint64_t>(length) * batch_size * length;
+
+    uint64_t save_memory64 = total > mem_limit
+        ? mem_limit / (static_cast<uint64_t>(batch_size) * length)
+        : length;
+
+    int save_memory = static_cast<int>(save_memory64);
 
     cout << "save memory: " << save_memory << endl;
     if (party == sci::ALICE) {
-        // set the offset directly in the index
-        for (int i = 0; i < batch_size; i++) {
-            x[offset[i] + i * length] = 1;
-        }
         nMinus1OUTNOT_batch(seeds, batch_size, length, nullptr);
         // std::cout << std::endl;
         // for (int ii = 0; ii < length; ii++) {
@@ -1701,6 +1705,18 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
             }
         }
 
+        for (int i = 0; i < length * batch_size; i++) {
+            delete[] shift_translate[i];
+        }
+        delete[] shift_translate;
+
+        auto *x = new uint8_t[length * batch_size]();
+        // set the offset directly in the index
+        for (int i = 0; i < batch_size; i++) {
+            x[offset[i] + i * length] = 1;
+        }
+
+
         memcpy(uniShr, b, batch_size * length * sizeof(uint8_t));
         for (int i = 0; i < length * batch_size; i++) {
             x[i] = x[i] ^ a[i];
@@ -1715,11 +1731,8 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
         // }
         // std::cout << std::endl;
 
-        for (int i = 0; i < length * batch_size; i++) {
-            delete[] shift_translate[i];
-        }
-        delete[] shift_translate;
         delete[] x_packed;
+        delete[] x;
         delete[] a;
         delete[] b;
     } else {
@@ -1824,7 +1837,7 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
         delete[] shift_xMa;
     }
     delete[] seeds;
-    delete[] x;
+    // delete[] x;
     // delete[] prg;
 }
 

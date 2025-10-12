@@ -14,7 +14,7 @@ using namespace std;
 using namespace sci;
 
 int party = 0, port = 8000;
-int eq = 0;
+// int eq = 0;
 string address = "127.0.0.1";
 int num_data = 8;
 int num_stand = 4;
@@ -22,7 +22,7 @@ int num_stand = 4;
 int main(int argc, char **argv) {
     ArgMapping amap;
     amap.arg("r", party, "Role of party: ALICE = 1; BOB = 2");
-    amap.arg("eq", eq, "eq=1 use count_eq");
+    // amap.arg("eq", eq, "eq=1 use count_eq");
     amap.arg("p", port, "Port Number");
     amap.arg("nd", num_data, "Number of elements");
     amap.arg("ns", num_stand, "Number of stands, or the k in shuffleTopk");

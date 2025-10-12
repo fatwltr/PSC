@@ -854,31 +854,40 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
     auto *seeds = new block128[num_stand * num_data * 2]();
     // auto *prg = new PRG128[num_stand * num_data * 2]();
     PRG128 prg;
-    auto **x = new uint8_t *[num_stand];
-    for (int i = 0; i < num_stand; i++) {
-        x[i] = new uint8_t[num_data * 2]();
-    }
+
     auto **uniShr = new uint8_t *[num_stand];
     for (int i = 0; i < num_stand; i++) {
-        uniShr[i] = new uint8_t[num_data * 2]();
+        uniShr[i] = new uint8_t[num_data]();
     }
     auto **interval_indicate = new uint8_t *[num_stand];
     for (int i = 0; i < num_stand; i++) {
         interval_indicate[i] = new uint8_t[num_data]();
     }
-    int save_memory = num_data * 2 > 2048 ? 2048 : num_data * 2;
+    // int save_memory = num_data * 2 > 2048 ? 2048 : num_data * 2;
+
+    // int save_memory = num_data * 2 * num_data * 2 > 11ULL * 1024 * 1024 * 1024 ? 11ULL * 1024 * 1024 * 1024 / (num_data * 2) : num_data * 2;
+    // save_memory = save_memory > num_data * 2 ? num_data * 2 : save_memory;
+
+    uint64_t mem_limit = 11ULL * 1024 * 1024 * 1024;  // 11 GiB
+    uint64_t total = static_cast<uint64_t>(num_data) * 2 * num_data * 2;
+
+    uint64_t save_memory64 = total > mem_limit
+        ? mem_limit / (static_cast<uint64_t>(num_data) * 2)
+        : static_cast<uint64_t>(num_data) * 2;
+
+    uint64_t save_memory = save_memory64;
+
+    cout << "save_memory = " << save_memory << endl;
+
     if (party == sci::ALICE) {
         // set the offset directly in the index
-        for (int i = 0; i < num_stand; i++) {
-            std::fill(x[i], x[i] + endpoints[i], 1);
-            std::fill(x[i] + num_data + endpoints[i], x[i] + 2 * num_data, 1);
-        }
+
 
         // do not need to generate a 2*num_data seed, we can set the second half seed directly as offset < num_data
         this->aux->nMinus1OUTNOT_batch(seeds, num_stand, 2 * num_data, nullptr);
         // generate the shift translation shares
 
-
+        // cout << "------" << endl;
         // cout << endl;
         // for (int i = 0; i < num_stand; i++) {
         //     for (int j = 0; j < num_data * 2; j++) {
@@ -970,6 +979,14 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         //     cout << endl;
         // }
 
+        auto **x = new uint8_t *[num_stand];
+        for (int i = 0; i < num_stand; i++) {
+            x[i] = new uint8_t[num_data * 2]();
+        }
+        for (int i = 0; i < num_stand; i++) {
+            std::fill(x[i], x[i] + endpoints[i], 1);
+            std::fill(x[i] + num_data + endpoints[i], x[i] + 2 * num_data, 1);
+        }
 
         for (int i = 0; i < num_stand; i++) {
             for (int j = 0; j < num_data * 2; j++) {
@@ -1004,9 +1021,9 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         // allocate the uniShr, and the
         auto **mux_choice = new uint8_t *[num_stand];
         for (int i = 0; i < num_stand; i++) {
-            mux_choice[i] = new uint8_t[num_data * 2]();
+            mux_choice[i] = new uint8_t[num_data]();
             for (int j = 0; j < num_data; j++) {
-                mux_choice[i][j] = b[i][j] ^ b[i][j + num_data];
+                mux_choice[i][j] = b[i][j + num_data] ^ b[i][j];
             }
         }
         uint64_t *temp = new uint64_t[num_stand];
@@ -1014,11 +1031,8 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
             temp[i] = num_data - endpoints[i];
         }
 
-        this->aux->mill->compare(t, temp, num_stand, bw_data);
+        this->aux->mill->compare(t, temp, num_stand, ceil(log2(num_data + 1)));
 
-        for (int i = 0; i < num_stand; i++) {
-            t[i] = 1 ^ t[i];
-        }
         // the result is >=
         // cout << "t: " << endl;
         // for (int i = 0; i < num_stand; i++) {
@@ -1028,11 +1042,10 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
 
 
         // mux_choice padding a 0-string
-        this->aux->multiplexer_bShr(t, mux_choice, uniShr, num_stand, num_data * 2);
+        this->aux->multiplexer_bShr(t, mux_choice, uniShr, num_stand, num_data);
         for (int i = 0; i < num_stand; i++) {
             for (int j = 0; j < num_data; j++) {
-                uniShr[i][j] ^= b[i][j + num_data];
-                uniShr[i][j] ^= uniShr[i][j + num_data];
+                uniShr[i][j] ^= b[i][j];
             }
         }
 
@@ -1043,9 +1056,11 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         for (int i = 0; i < num_stand; i++) {
             delete[] a[i];
             delete[] b[i];
+            delete[] x[i];
             delete[] mux_choice[i];
         }
         delete[] x_packed;
+        delete[] x;
         delete[] temp;
         delete[] mux_choice;
         delete[] a;
@@ -1175,7 +1190,7 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
 
         for (int i = 0; i < num_stand; i++) {
             for (int j = 0; j < num_data * 2; j++) {
-                x[i][j] = c[i][j] ^ shift_xMa[i][j];
+                xMa[i][j] = c[i][j] ^ shift_xMa[i][j];
             }
         }
 
@@ -1184,7 +1199,7 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         // cout << "---------c xor shift_xMa-----------" << endl;
         // for (int i = 0; i < num_stand; i++) {
         //     for (int j = 0; j < num_data * 2; j++) {
-        //         cout << (int) x[i][j] << ", ";
+        //         cout << (int) xMa[i][j] << ", ";
         //     }
         //     cout << endl;
         // }
@@ -1192,14 +1207,13 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
 
         auto **mux_choice = new uint8_t *[num_stand];
         for (int i = 0; i < num_stand; i++) {
-            mux_choice[i] = new uint8_t[num_data * 2](); // *2 due to the shifted vector is shared
-            for (int j = num_data; j < 2 * num_data; j++) {
-                mux_choice[i][j] = x[i][j - num_data] ^ x[i][j];
+            mux_choice[i] = new uint8_t[num_data]();
+            for (int j = 0; j < num_data; j++) {
+                mux_choice[i][j] = xMa[i][j] ^ xMa[i][j + num_data];
             }
         }
 
-        this->aux->mill->compare(t, endpoints, num_stand, bw_data);
-        // mux_choice padding a 0-string
+        this->aux->mill->compare(t, endpoints, num_stand, ceil(log2(num_data + 1)));
 
         // cout << "t: " << endl;
         // for (int i = 0; i < num_stand; i++) {
@@ -1208,11 +1222,10 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         // cout << endl;
 
 
-        this->aux->multiplexer_bShr(t, mux_choice, uniShr, num_stand, num_data * 2);
+        this->aux->multiplexer_bShr(t, mux_choice, uniShr, num_stand, num_data);
         for (int i = 0; i < num_stand; i++) {
-            for (int j = num_data; j < 2 * num_data; j++) {
-                uniShr[i][j] ^= x[i][j];
-                uniShr[i][j - num_data] ^= uniShr[i][j];
+            for (int j = 0; j < num_data; j++) {
+                uniShr[i][j] ^= xMa[i][j];
             }
         }
 
@@ -1261,6 +1274,7 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
             interval_indicate[i][j] = uniShr[i][j] ^ uniShr[i - 1][j];
         }
     }
+
     // cout << "interval_indicate" << endl;
     // for (int i = 0; i < num_stand; i++) {
     //     cout << endl;
@@ -1295,11 +1309,11 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
     delete[] seeds;
     // delete[] prg;
     for (int i = 0; i < num_stand; i++) {
-        delete[] x[i];
+        // delete[] x[i];
         delete[] uniShr[i];
         delete[] interval_indicate[i];
     }
-    delete[] x;
+    // delete[] x;
     delete[] uniShr;
     delete[] interval_indicate;
 }
