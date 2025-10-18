@@ -1618,6 +1618,9 @@ void AuxProtocols::uniShare_naive_bool(uint8_t *uniShr, int length, const uint64
 // }
 
 void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, int length, uint64_t *offset) {
+    int n_th = omp_get_num_procs() / 4;
+    cout << "n_th = " << n_th << endl;
+    omp_set_num_threads(n_th);
     auto *seeds = new block128[length * batch_size]();
     // auto *prg = new PRG128[length * batch_size]();
     PRG128 prg;
@@ -1630,6 +1633,8 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
     uint64_t save_memory64 = total > mem_limit
         ? mem_limit / (static_cast<uint64_t>(batch_size) * length)
         : length;
+
+    save_memory64 = save_memory64 > length ? length : save_memory64;
 
     int save_memory = static_cast<int>(save_memory64);
 
@@ -1712,12 +1717,14 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
 
         auto *x = new uint8_t[length * batch_size]();
         // set the offset directly in the index
+#pragma omp parallel for
         for (int i = 0; i < batch_size; i++) {
             x[offset[i] + i * length] = 1;
         }
 
 
         memcpy(uniShr, b, batch_size * length * sizeof(uint8_t));
+#pragma omp parallel for
         for (int i = 0; i < length * batch_size; i++) {
             x[i] = x[i] ^ a[i];
         }
@@ -1792,7 +1799,6 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
                 prg.reseed(&seeds[i * length + j]);
                 prg.random_bool((bool *) shift_translate[j], last);
             }
-
             for (int j = 0; j < length; j++) {
                 for (int l = 0; l < last; l++) {
                     c[j + i * length] ^= shift_translate[(j - l - k * save_memory + length) % length + i * length][l];

@@ -48,6 +48,12 @@ public:
     void mode_naive(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand, int32_t bw_data,
                     int32_t bw_res, uint8_t eq);
 
+    void mode_Mor(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand, int32_t bw_data,
+                  int32_t bw_res);
+
+    void mode_Mor_batch(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand, int32_t bw_data,
+                        int32_t bw_res);
+
     void mode_CRT_eq(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand, int32_t bw_data,
                      int32_t bw_res);
 
@@ -55,26 +61,47 @@ public:
                         int32_t bw_res);
 
     void count_sort(uint64_t *res, uint64_t *frequency, int num_stand, int num_data,
-                           int32_t bw_data, int32_t bw_res);
+                    int32_t bw_data, int32_t bw_res);
+
     void shuffle_sort(uint64_t *res, uint64_t *data, int num_stand, int num_data,
-                           int32_t bw_data, int32_t bw_res);
+                      int32_t bw_data, int32_t bw_res);
+
+    void compare_and_swap(uint64_t *arr1, uint64_t *arr2, int length, int32_t bw_data, int32_t bw_res);
+
+    void batcher_merge(uint64_t *data, int num_stand, int num_data, int32_t bw_data, int32_t bw_res);
+
+    void batcher_sort(uint64_t *data, int num_stand, int num_data,
+                      int32_t bw_data, int32_t bw_res);
+
+    void batcher_network_sort(uint64_t *data, int num_stand, int num_data,
+                                 int32_t bw_data, int32_t bw_res);
+
     int partition(uint64_t *arr, int low, int high, int bw);
+
     void quickSort(uint64_t *arr, int low, int high, int bw);
 
     int partitionTopK(uint64_t *arr, int low, int high, int bw);
+
     void topKSelect(uint64_t *arr, int low, int high, int k, int bw);
+
     void shuffle_topk(uint64_t *res, uint64_t *data, int k, int num_data,
-                             int32_t bw_data, int32_t bw_res);
+                      int32_t bw_data, int32_t bw_res);
 
-    void count_kth(uint64_t* res, uint64_t *frequency, int k, int num_stand, int num_data,
-                           int32_t bw_data, int32_t bw_res);
+    void count_kth(uint64_t *res, uint64_t *frequency, int k, int num_stand, int num_data,
+                   int32_t bw_data, int32_t bw_res);
 
-    void oblivious_shuffle(uint64_t *res, uint64_t *perm, uint64_t* data, int num_data, int32_t bw_data);
-    void oblivious_shuffle_reverse(uint64_t *res, uint64_t *perm, uint64_t* data, int num_data, int32_t bw_data);
+    void oblivious_shuffle(uint64_t *res, uint64_t *perm, uint64_t *data, int num_data, int32_t bw_data);
 
-    void pack_bits(uint8_t **x, uint8_t* x_packed, int rows, int cols);
+    void oblivious_shuffle_reverse(uint64_t *res, uint64_t *perm, uint64_t *data, int num_data, int32_t bw_data);
 
-    void unpack_bits(uint8_t* x_packed, uint8_t **x, int rows, int cols) ;
+    void pack_bits(uint8_t **x, uint8_t *x_packed, int rows, int cols);
+
+    void pack_bits(const uint8_t *x, uint8_t *x_packed, int length);
+
+    // void Frequency::unpack_bits(const uint8_t *x_packed, uint8_t *x, int length)
+    void unpack_bits(const uint8_t *x_packed, uint8_t *x, int length);
+
+    void unpack_bits(uint8_t *x_packed, uint8_t **x, int rows, int cols);
 
     void pack_data(uint64_t *x, uint64_t *x_packed, int length, int bw);
 
