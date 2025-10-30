@@ -89,6 +89,9 @@ public:
     void ln_v2(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x,
                   int32_t bw_y, int32_t s_x, int32_t s_y);
 
+    void ln_v1(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x,
+                  int32_t bw_y, int32_t s_x, int32_t s_y);
+
     // void newton_inverse_sqrt(int32_t dim, uint64_t *init_guess, uint64_t *x, int32_t bw,
     //                          int32_t scale);
 

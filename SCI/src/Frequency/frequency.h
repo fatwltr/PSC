@@ -82,12 +82,14 @@ public:
 
     int partitionTopK(uint64_t *arr, int low, int high, int bw);
 
-    void topKSelect(uint64_t *arr, int low, int high, int k, int bw);
+    int topKSelect(uint64_t *arr, int low, int high, int k, int bw);
 
     void shuffle_topk(uint64_t *res, uint64_t *data, int k, int num_data,
                       int32_t bw_data, int32_t bw_res);
 
     void count_kth(uint64_t *res, uint64_t *frequency, int k, int num_stand, int num_data,
+                   int32_t bw_data, int32_t bw_res);
+    void count_kth_linear(uint64_t *res, uint64_t *frequency, int k, int num_stand, int num_data,
                    int32_t bw_data, int32_t bw_res);
 
     void oblivious_shuffle(uint64_t *res, uint64_t *perm, uint64_t *data, int num_data, int32_t bw_data);

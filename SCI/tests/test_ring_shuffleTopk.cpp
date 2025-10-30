@@ -43,12 +43,14 @@ int main(int argc, char **argv) {
     prg.random_data(data, num_data * sizeof(uint64_t));
     for (int i = 0; i < num_data; ++i) {
         data[i] &= (1ULL << bw_data) - 1;
+        // cout << data[i] << " ";
     }
+    // cout << endl;
 
     auto start = clock_start();
     uint64_t comm = iopack->get_comm();
 
-    frequency->shuffle_topk(res, data, num_data / 4, num_data, bw_data, bw_res); // the res here should be num_data as the code inner shuffle_topk reuse the res.
+    frequency->shuffle_topk(res, data, num_data / 2, num_data, bw_data, bw_res); // the res here should be num_data as the code inner shuffle_topk reuse the res.
 
     comm = iopack->get_comm() - comm;
     long long t = time_from(start);

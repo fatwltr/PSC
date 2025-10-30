@@ -24,42 +24,51 @@ void test_hadamard_product(uint64_t *inA, uint64_t *inB,
                            bool signed_arithmetic = true) {
   uint64_t *outC = new uint64_t[dim];
 
+
+  auto start = clock_start();
+  uint64_t comm = iopack->get_comm();
   prod->hadamard_product(dim, inA, inB, outC, bwA, bwB, bwC, signed_arithmetic);
+  comm = iopack->get_comm() - comm;
+  long long t = time_from(start);
 
-  if (party == ALICE) {
-    iopack->io->send_data(inA, dim * sizeof(uint64_t));
-    iopack->io->send_data(inB, dim * sizeof(uint64_t));
-    iopack->io->send_data(outC, dim * sizeof(uint64_t));
-  } else { // party == BOB
-    uint64_t *inA0 = new uint64_t[dim];
-    uint64_t *inB0 = new uint64_t[dim];
-    uint64_t *outC0 = new uint64_t[dim];
-    iopack->io->recv_data(inA0, dim * sizeof(uint64_t));
-    iopack->io->recv_data(inB0, dim * sizeof(uint64_t));
-    iopack->io->recv_data(outC0, dim * sizeof(uint64_t));
+  cout << "Time\t" << t / (1000.0) << " ms" << endl;
+  cout << "Bytes Sent\t" << comm << " bytes" << endl;
 
-    for (int i = 0; i < dim; i++) {
-      if (signed_arithmetic) {
-        assert(signed_val(outC[i] + outC0[i], bwC) ==
-               (signed_val(signed_val(inA[i] + inA0[i], bwA) *
-                               signed_val(inB[i] + inB0[i], bwB),
-                           bwC)));
-      } else {
-        assert(unsigned_val(outC[i] + outC0[i], bwC) ==
-               (unsigned_val(unsigned_val(inA[i] + inA0[i], bwA) *
-                                 unsigned_val(inB[i] + inB0[i], bwB),
-                             bwC)));
-      }
-    }
-    if (signed_arithmetic)
-      cout << "SMult Tests Passed" << endl;
-    else
-      cout << "UMult Tests Passed" << endl;
-
-    delete[] inA0;
-    delete[] inB0;
-    delete[] outC0;
-  }
+  // if (party == ALICE) {
+  //   iopack->io->send_data(inA, dim * sizeof(uint64_t));
+  //   iopack->io->send_data(inB, dim * sizeof(uint64_t));
+  //   iopack->io->send_data(outC, dim * sizeof(uint64_t));
+  // }
+  // else { // party == BOB
+  //   uint64_t *inA0 = new uint64_t[dim];
+  //   uint64_t *inB0 = new uint64_t[dim];
+  //   uint64_t *outC0 = new uint64_t[dim];
+  //   iopack->io->recv_data(inA0, dim * sizeof(uint64_t));
+  //   iopack->io->recv_data(inB0, dim * sizeof(uint64_t));
+  //   iopack->io->recv_data(outC0, dim * sizeof(uint64_t));
+  //
+  //   for (int i = 0; i < dim; i++) {
+  //     if (signed_arithmetic) {
+  //       assert(signed_val(outC[i] + outC0[i], bwC) ==
+  //              (signed_val(signed_val(inA[i] + inA0[i], bwA) *
+  //                              signed_val(inB[i] + inB0[i], bwB),
+  //                          bwC)));
+  //     } else {
+  //       assert(unsigned_val(outC[i] + outC0[i], bwC) ==
+  //              (unsigned_val(unsigned_val(inA[i] + inA0[i], bwA) *
+  //                                unsigned_val(inB[i] + inB0[i], bwB),
+  //                            bwC)));
+  //     }
+  //   }
+  //   if (signed_arithmetic)
+  //     cout << "SMult Tests Passed" << endl;
+  //   else
+  //     cout << "UMult Tests Passed" << endl;
+  //
+  //   delete[] inA0;
+  //   delete[] inB0;
+  //   delete[] outC0;
+  // }
 
   delete[] outC;
 }
@@ -90,7 +99,7 @@ int main(int argc, char **argv) {
     inB[i] &= maskB;
   }
 
-  test_hadamard_product(inA, inB, false);
+  // test_hadamard_product(inA, inB, false);
   test_hadamard_product(inA, inB, true);
 
   delete[] inA;

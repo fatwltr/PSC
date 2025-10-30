@@ -45,7 +45,9 @@ int main(int argc, char **argv) {
     prg.random_data(data, num_data * sizeof(uint64_t));
     for (int i = 0; i < num_data; ++i) {
         data[i] &= (1ULL << bw_data) - 1;
+        // cout << data[i] << " ";
     }
+    // cout << endl;
 
     auto start = clock_start();
     uint64_t comm = iopack->get_comm();

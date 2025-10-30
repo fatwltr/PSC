@@ -89,26 +89,31 @@ void Frequency::count_eq(uint64_t *res, uint64_t *data, int num_data, uint64_t *
 void Frequency::count_eq_batch(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand,
                                int32_t bw_data,
                                int32_t bw_res) {
+    int n_th = (omp_get_num_procs() - 8) / 2;
+    omp_set_num_threads(n_th);
     uint8_t *temp = new uint8_t[num_data * num_stand]();
     uint64_t mask_data = (bw_data == 64 ? -1 : ((1ULL << bw_data) - 1));
     uint64_t mask_res = (bw_res == 64 ? -1 : ((1ULL << bw_res) - 1));
     uint64_t *t = new uint64_t[num_data * num_stand]();
     if (party == ALICE) {
+#pragma omp parallel for collapse(2) schedule(static)
         for (int i = 0; i < num_stand; i++) {
             for (int j = 0; j < num_data; j++) {
                 t[i * num_data + j] = (stand[i] - data[j] + num_stand) % num_stand;
             }
         }
+
         equality->check_equality(temp, t, num_data * num_stand, bw_data);
         aux->B2A(temp, t, num_data * num_stand, bw_res);
+#pragma omp parallel for schedule(static)
         for (int i = 0; i < num_stand; i++) {
             for (int j = 0; j < num_data; j++) {
                 res[i] += t[i * num_data + j];
                 res[i] &= mask_res;
             }
-            res[i] &= mask_res;
         }
     } else {
+#pragma omp parallel for collapse(2) schedule(static)
         for (int i = 0; i < num_stand; i++) {
             for (int j = 0; j < num_data; j++) {
                 t[i * num_data + j] = (data[j] + num_stand) % num_stand;
@@ -116,12 +121,12 @@ void Frequency::count_eq_batch(uint64_t *res, uint64_t *data, int num_data, uint
         }
         equality->check_equality(temp, t, num_data * num_stand, bw_data);
         aux->B2A(temp, t, num_data * num_stand, bw_res);
+#pragma omp parallel for schedule(static)
         for (int i = 0; i < num_stand; i++) {
             for (int j = 0; j < num_data; j++) {
                 res[i] += t[i * num_data + j];
                 res[i] &= mask_res;
             }
-            res[i] &= mask_res;
         }
     }
 
@@ -154,6 +159,8 @@ void Frequency::count_shift(uint64_t *res, uint64_t *data, int num_data, uint64_
 
 void Frequency::count_shift_batch(uint64_t *res, uint64_t *data, int num_data, uint64_t *stand, int num_stand,
                                   int32_t bw_data, int32_t bw_res) {
+    int n_th = (omp_get_num_procs() - 8) / 2;
+    omp_set_num_threads(n_th);
     uint8_t *t_shifted = new uint8_t[num_stand * num_data];
     uint64_t mask_res = (bw_res == 64 ? -1 : ((1ULL << bw_res) - 1));
     uint64_t *t = new uint64_t[num_stand * num_data];
@@ -161,7 +168,11 @@ void Frequency::count_shift_batch(uint64_t *res, uint64_t *data, int num_data, u
         data[i] = data[i] % num_stand;
     }
     aux->uniShare_naive_bool_batch(t_shifted, num_data, num_stand, data);
+    // auto start = clock_start();
     aux->B2A(t_shifted, t, num_data * num_stand, bw_res);
+    // long long time = time_from(start);
+    // cout << "B2A time: " << time / (1000.0) << " ms" << endl;
+#pragma omp parallel for schedule(static)
     for (int i = 0; i < num_data; i++) {
         for (int j = 0; j < num_stand; j++) {
             res[j] += t[i * num_stand + j];
@@ -1011,7 +1022,7 @@ void print_block_(const block128 &b) {
 
 void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, int num_data,
                            int32_t bw_data, int32_t bw_res) {
-    int n_th = omp_get_num_procs() / 2;
+    int n_th = (omp_get_num_procs() - 8) / 2;
     cout << "n_th = " << n_th << endl;
     omp_set_num_threads(n_th);
     uint64_t *endpoints = new uint64_t[num_stand]();
@@ -1057,7 +1068,7 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
     uint64_t mask_res = (bw_res == 64 ? -1 : ((1ULL << bw_res) - 1));
     auto *seeds = new block128[num_stand * num_data * 2]();
     // auto *prg = new PRG128[num_stand * num_data * 2]();
-    PRG128 prg;
+    // PRG128 prg;
 
     auto **uniShr = new uint8_t *[num_stand];
     for (int i = 0; i < num_stand; i++) {
@@ -1072,7 +1083,7 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
     // int save_memory = num_data * 2 * num_data * 2 > 11ULL * 1024 * 1024 * 1024 ? 11ULL * 1024 * 1024 * 1024 / (num_data * 2) : num_data * 2;
     // save_memory = save_memory > num_data * 2 ? num_data * 2 : save_memory;
 
-    uint64_t mem_limit = 11ULL * 1024 * 1024 * 1024; // 11 GiB
+    uint64_t mem_limit = 3ULL * 1024 * 1024 * 1024; // 3 GiB
     uint64_t total = static_cast<uint64_t>(num_data) * 2 * num_data * 2;
 
     uint64_t save_memory64 = total > mem_limit
@@ -1100,10 +1111,7 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         // }
         // cout << endl;
 
-        auto **shift_translate = new uint8_t *[num_data * 2];
-        for (int i = 0; i < num_data * 2; i++) {
-            shift_translate[i] = new uint8_t[save_memory]();
-        }
+
         auto *a = new uint8_t [num_data * 2 * num_stand]();
         auto *b = new uint8_t [num_data * 2 * num_stand]();
 
@@ -1112,55 +1120,66 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         //         prg[i * num_data * 2 + j].reseed(&seeds[i * num_data * 2 + j]);
         //     }
         // }
+#pragma omp parallel
+        {
+            PRG128 prg;
+            auto **shift_translate = new uint8_t *[num_data * 2];
+            for (int i = 0; i < num_data * 2; i++) {
+                shift_translate[i] = new uint8_t[save_memory]();
+            }
+#pragma omp for schedule(static)
+            for (int i = 0; i < num_stand; i++) {
+                for (int k = 0; k < (num_data * 2 / save_memory); k++) {
+                    for (int j = 0; j < num_data * 2; j++) {
+                        prg.reseed(&seeds[i * num_data * 2 + j]);
+                        prg.random_bool((bool *) shift_translate[j], save_memory);
+                    }
 
-        for (int i = 0; i < num_stand; i++) {
-            for (int k = 0; k < (num_data * 2 / save_memory); k++) {
+                    // cout << "shift_translate" << endl;
+                    // for (int j = 0; j < num_data * 2; j++) {
+                    //     for (int l = 0; l < save_memory; l++) {
+                    //         cout << (int) shift_translate[j][l] << " ";
+                    //     }
+                    //     cout << endl;
+                    // }
+
+                    for (int j = 0; j < num_data * 2; j++) {
+                        for (int l = 0; l < save_memory; l++) {
+                            a[i * num_data * 2 + l + k * save_memory] ^= shift_translate[j][l];
+                            b[i * num_data * 2 + j] ^= shift_translate[
+                                (j - l - k * save_memory + num_data * 2) % (num_data * 2)][l];
+                        }
+                    }
+                }
+                int last = num_data * 2 % save_memory;
+                if (last == 0) {
+                    continue;
+                }
+                int k = (num_data * 2 / save_memory);
                 for (int j = 0; j < num_data * 2; j++) {
                     prg.reseed(&seeds[i * num_data * 2 + j]);
-                    prg.random_bool((bool *) shift_translate[j], save_memory);
+                    prg.random_bool((bool *) shift_translate[j], last);
                 }
-
                 // cout << "shift_translate" << endl;
                 // for (int j = 0; j < num_data * 2; j++) {
-                //     for (int l = 0; l < save_memory; l++) {
+                //     for (int l = 0; l < last; l++) {
                 //         cout << (int) shift_translate[j][l] << " ";
                 //     }
                 //     cout << endl;
                 // }
-
                 for (int j = 0; j < num_data * 2; j++) {
-                    for (int l = 0; l < save_memory; l++) {
+                    for (int l = 0; l < last; l++) {
                         a[i * num_data * 2 + l + k * save_memory] ^= shift_translate[j][l];
                         b[i * num_data * 2 + j] ^= shift_translate[
                             (j - l - k * save_memory + num_data * 2) % (num_data * 2)][l];
                     }
                 }
             }
-            int last = num_data * 2 % save_memory;
-            if (last == 0) {
-                continue;
+            for (int i = 0; i < num_data * 2; i++) {
+                delete[] shift_translate[i];
             }
-            int k = (num_data * 2 / save_memory);
-            for (int j = 0; j < num_data * 2; j++) {
-                prg.reseed(&seeds[i * num_data * 2 + j]);
-                prg.random_bool((bool *) shift_translate[j], last);
-            }
-            // cout << "shift_translate" << endl;
-            // for (int j = 0; j < num_data * 2; j++) {
-            //     for (int l = 0; l < last; l++) {
-            //         cout << (int) shift_translate[j][l] << " ";
-            //     }
-            //     cout << endl;
-            // }
-            for (int j = 0; j < num_data * 2; j++) {
-                for (int l = 0; l < last; l++) {
-                    a[i * num_data * 2 + l + k * save_memory] ^= shift_translate[j][l];
-                    b[i * num_data * 2 + j] ^= shift_translate[
-                        (j - l - k * save_memory + num_data * 2) % (num_data * 2)][l];
-                }
-            }
+            delete[] shift_translate;
         }
-
         // cout << endl;
         // cout << "----------x---------------" << endl;
         // for (int i = 0; i < num_stand; i++) {
@@ -1247,10 +1266,6 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
             }
         }
 
-        for (int i = 0; i < num_data * 2; i++) {
-            delete[] shift_translate[i];
-        }
-        delete[] shift_translate;
         for (int i = 0; i < num_stand; i++) {
             delete[] mux_choice[i];
         }
@@ -1284,57 +1299,69 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         //         prg.reseed(&seeds[i * num_data * 2 + j]);
         //     }
         // }
-
-        for (int i = 0; i < num_stand; i++) {
-            for (int k = 0; k < (num_data * 2 / save_memory); k++) {
+#pragma omp parallel
+        {
+            PRG128 prg;
+            auto **shift_translate = new uint8_t *[num_data * 2];
+            for (int i = 0; i < num_data * 2; i++) {
+                shift_translate[i] = new uint8_t[save_memory]();
+            }
+#pragma omp for schedule(static)
+            for (int i = 0; i < num_stand; i++) {
+                for (int k = 0; k < (num_data * 2 / save_memory); k++) {
+                    for (int j = 0; j < num_data * 2; j++) {
+                        prg.reseed(&seeds[i * num_data * 2 + j]);
+                        prg.random_bool((bool *) shift_translate[j], save_memory);
+                    }
+                    // cout << "shift_translate" << endl;
+                    // for (int j = 0; j < num_data * 2; j++) {
+                    //     for (int l = 0; l < save_memory; l++) {
+                    //         cout << (int) shift_translate[j][l] << " ";
+                    //     }
+                    //     cout << endl;
+                    // }
+                    for (int j = 0; j < num_data * 2; j++) {
+                        for (int l = 0; l < save_memory; l++) {
+                            c[i * num_data * 2 + j] ^= shift_translate[
+                                (j - l - k * save_memory + num_data * 2) % (num_data * 2)][l];
+                            c[i * num_data * 2 + ((l + k * save_memory + endpoints[i] + 2 * num_data) % (2 * num_data))] ^=
+                                    shift_translate[j][l];
+                        }
+                    }
+                }
+                int last = num_data * 2 % save_memory;
+                if (last == 0) {
+                    continue;
+                }
+                int k = (num_data * 2 / save_memory);
                 for (int j = 0; j < num_data * 2; j++) {
+                    if (j == endpoints[i]) {
+                        std::fill(shift_translate[j], shift_translate[j] + save_memory, 0);
+                        continue;
+                    }
                     prg.reseed(&seeds[i * num_data * 2 + j]);
-                    prg.random_bool((bool *) shift_translate[j], save_memory);
+                    prg.random_bool((bool *) shift_translate[j], last);
                 }
                 // cout << "shift_translate" << endl;
                 // for (int j = 0; j < num_data * 2; j++) {
-                //     for (int l = 0; l < save_memory; l++) {
+                //     for (int l = 0; l < last; l++) {
                 //         cout << (int) shift_translate[j][l] << " ";
                 //     }
                 //     cout << endl;
                 // }
                 for (int j = 0; j < num_data * 2; j++) {
-                    for (int l = 0; l < save_memory; l++) {
+                    for (int l = 0; l < last; l++) {
                         c[i * num_data * 2 + j] ^= shift_translate[
                             (j - l - k * save_memory + num_data * 2) % (num_data * 2)][l];
-                        c[i * num_data * 2 + ((l + k * save_memory + endpoints[i] + 2 * num_data) % (2 * num_data))] ^=
+                        c[i * num_data * 2 + (l + k * save_memory + endpoints[i]) % (2 * num_data)] ^=
                                 shift_translate[j][l];
                     }
                 }
             }
-            int last = num_data * 2 % save_memory;
-            if (last == 0) {
-                continue;
+            for (int i = 0; i < 2 * num_data; i++) {
+                delete[] shift_translate[i];
             }
-            int k = (num_data * 2 / save_memory);
-            for (int j = 0; j < num_data * 2; j++) {
-                if (j == endpoints[i]) {
-                    std::fill(shift_translate[j], shift_translate[j] + save_memory, 0);
-                    continue;
-                }
-                prg.reseed(&seeds[i * num_data * 2 + j]);
-                prg.random_bool((bool *) shift_translate[j], last);
-            }
-            // cout << "shift_translate" << endl;
-            // for (int j = 0; j < num_data * 2; j++) {
-            //     for (int l = 0; l < last; l++) {
-            //         cout << (int) shift_translate[j][l] << " ";
-            //     }
-            //     cout << endl;
-            // }
-            for (int j = 0; j < num_data * 2; j++) {
-                for (int l = 0; l < last; l++) {
-                    c[i * num_data * 2 + j] ^= shift_translate[
-                        (j - l - k * save_memory + num_data * 2) % (num_data * 2)][l];
-                    c[i * num_data * 2 + (l + k * save_memory + endpoints[i] + 2 * num_data) % (2 * num_data)] ^=
-                            shift_translate[j][l];
-                }
-            }
+            delete[] shift_translate;
         }
 
         // cout << endl;
@@ -1420,10 +1447,6 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
             }
         }
 
-        for (int i = 0; i < 2 * num_data; i++) {
-            delete[] shift_translate[i];
-        }
-        delete[] shift_translate;
         for (int i = 0; i < num_stand; i++) {
             delete[] mux_choice[i];
         }
@@ -1508,7 +1531,6 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
     delete[] uniShr;
     delete[] interval_indicate;
 }
-
 
 
 // slower version
@@ -2036,7 +2058,6 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
 // }
 
 
-
 void random_permutation(uint64_t *perm, int n) {
     // initialize with 0, 1, 2, ..., n-1
     for (int i = 0; i < n; ++i) {
@@ -2332,49 +2353,75 @@ void Frequency::oblivious_shuffle_reverse(uint64_t *res, uint64_t *perm, uint64_
 // Function to partition the array
 int Frequency::partition(uint64_t *arr, int low, int high, int bw) {
     int pivot = arr[high]; // choose the last element as pivot
-    int i = low - 1; // index of smaller element
     uint64_t mask_l = (1ULL << bw) - 1;
-    uint8_t res;
-    uint8_t res_t;
-    uint64_t Za;
-    uint64_t compare_with;
+    uint8_t *res = new uint8_t[high - low]();
+    uint8_t *res_t = new uint8_t[high - low]();
+    uint64_t *Zab = new uint64_t[high - low]();
+    uint64_t *compare_with = new uint64_t[high - low]();
+    uint8_t *bab = new uint8_t[high - low]();
+    int ttt = (high - low + 7) / 8;
+    uint8_t *x_packed_send = new uint8_t[ttt]();
+    uint8_t *x_packed_recv = new uint8_t[ttt]();
     for (int j = low; j < high; j++) {
-        // cout << pivot << " " << arr[j] << endl;
-        // conduct a private cmp
         if (party == sci::ALICE) {
-            Za = (pivot - arr[j]) & mask_l;
-            compare_with = Za & ((1 << (bw - 1)) - 1);
-            // std::cout << "wa: " << compare_with << std::endl;
-            aux->mill->compare(&res, &compare_with, 1, bw);
-            // std::cout << "res: " << static_cast<uint32_t>(res) << std::endl;
-            uint8_t ba = Za < (1 << (bw - 1));
-            // std::cout << "ba: " << static_cast<uint32_t>(ba) << std::endl;
-            res ^= ba;
-            // std::cout << static_cast<uint32_t>(res) << " ";
-            iopack->io->send_data(&res, sizeof(uint8_t));
-            iopack->io->recv_data(&res_t, sizeof(uint8_t));
+            Zab[j - low] = (pivot - arr[j]) & mask_l;
+            compare_with[j - low] = Zab[j - low] & ((1 << (bw - 1)) - 1);
+            bab[j - low] = Zab[j - low] < (1 << (bw - 1));
         } else {
-            uint64_t Zb = (pivot - arr[j]) & mask_l;
-            compare_with = (1 << (bw - 1)) - (Zb & ((1 << (bw - 1)) - 1));
-            // std::cout << "t/2 - wb: " << compare_with << std::endl;
-            aux->mill->compare(&res, &compare_with, 1, bw);
-            // std::cout << "res: " << static_cast<uint32_t>(res) << std::endl;
-            uint8_t bb = Zb < (1 << (bw - 1));
-            // std::cout << "bb: " << static_cast<uint32_t>(bb) << std::endl;
-            res ^= bb;
-            res ^= 1;
-            // std::cout << static_cast<uint32_t>(res) << " ";
-            iopack->io->recv_data(&res_t, sizeof(uint8_t));
-            iopack->io->send_data(&res, sizeof(uint8_t));
-        }
-        // cout << (int)(res_t ^ res) << endl;
-        if (res_t ^ res) {
-            i++;
-            swap(arr[i], arr[j]);
+            Zab[j - low] = (pivot - arr[j]) & mask_l;
+            compare_with[j - low] = (1 << (bw - 1)) - (Zab[j - low] & ((1 << (bw - 1)) - 1));
+            bab[j - low] = Zab[j - low] < (1 << (bw - 1));
         }
     }
-    swap(arr[i + 1], arr[high]);
-    return i + 1;
+    if (party == sci::ALICE) {
+        aux->mill->compare(res, compare_with, high - low, bw);
+        // std::cout << "res: " << static_cast<uint32_t>(res) << std::endl;
+        // std::cout << "ba: " << static_cast<uint32_t>(ba) << std::endl;
+        for (int j = low; j < high; j++) {
+            res[j - low] ^= bab[j - low];
+        }
+        // std::cout << static_cast<uint32_t>(res) << " ";
+        pack_bits(res, x_packed_send, high - low);
+        iopack->io->send_data(x_packed_send, ttt * sizeof(uint8_t));
+        iopack->io->recv_data(x_packed_recv, ttt * sizeof(uint8_t));
+        unpack_bits(x_packed_recv, res_t, high - low);
+    } else {
+        aux->mill->compare(res, compare_with, high - low, bw);
+        for (int j = low; j < high; j++) {
+            res[j - low] ^= bab[j - low];
+            res[j - low] ^= 1;
+        }
+        iopack->io->recv_data(x_packed_recv, ttt * sizeof(uint8_t));
+        unpack_bits(x_packed_recv, res_t, high - low);
+        pack_bits(res, x_packed_send, high - low);
+        iopack->io->send_data(x_packed_send, ttt * sizeof(uint8_t));
+    }
+    int low_idx = 0;
+    int high_idx = high - low;
+    uint64_t* temp = new uint64_t[high - low + 1]();
+    for (int j = low; j < high; j++) {
+        if (res_t[j - low] ^ res[j - low]) {
+            temp[low_idx] = arr[j];
+            low_idx++;
+        }
+        else {
+            temp[high_idx] = arr[j];
+            high_idx--;
+        }
+    }
+    temp[low_idx] = arr[high];
+    for (int j = low; j <= high;j++) {
+        arr[j] = temp[j - low];
+    }
+    delete[] res;
+    delete[] temp;
+    delete[] res_t;
+    delete[] Zab;
+    delete[] compare_with;
+    delete[] bab;
+    delete[] x_packed_recv;
+    delete[] x_packed_send;
+    return low + low_idx;
 }
 
 // Quicksort function
@@ -2603,54 +2650,90 @@ void Frequency::batcher_network_sort(uint64_t *data, int num_stand, int num_data
 // Partition function for top-k selection
 int Frequency::partitionTopK(uint64_t *arr, int low, int high, int bw) {
     uint64_t pivot = arr[high]; // choose last element as pivot
-    int i = low - 1;
     uint64_t mask_l = (1ULL << bw) - 1;
-    uint8_t res, res_t;
-    uint64_t compare_with;
-    uint64_t Za;
+    uint8_t *res = new uint8_t[high - low]();
+    uint8_t *res_t = new uint8_t[high - low]();
+    uint8_t *bab = new uint8_t[high - low]();
+    uint64_t *compare_with = new uint64_t[high - low]();
+    uint64_t *Zab = new uint64_t[high - low]();
+    int ttt = (high - low + 7) / 8;
+    uint8_t *x_packed_send = new uint8_t[ttt]();
+    uint8_t *x_packed_recv = new uint8_t[ttt]();
 
     for (int j = low; j < high; j++) {
         if (party == sci::ALICE) {
-            Za = (arr[j] - pivot) & mask_l; // flip comparison to get top-k
-            compare_with = Za & ((1ULL << (bw - 1)) - 1);
-            aux->mill->compare(&res, &compare_with, 1, bw);
-            uint8_t ba = Za < (1ULL << (bw - 1));
-            res ^= ba;
-            iopack->io->send_data(&res, sizeof(uint8_t));
-            iopack->io->recv_data(&res_t, sizeof(uint8_t));
+            Zab[j - low] = (arr[j] - pivot) & mask_l; // flip comparison to get top-k
+            compare_with[j - low] = Zab[j - low] & ((1ULL << (bw - 1)) - 1);
+            bab[j - low] = Zab[j - low] < (1ULL << (bw - 1));
         } else {
-            uint64_t Zb = (arr[j] - pivot) & mask_l;
-            compare_with = (1ULL << (bw - 1)) - (Zb & ((1ULL << (bw - 1)) - 1));
-            aux->mill->compare(&res, &compare_with, 1, bw);
-            uint8_t bb = Zb < (1ULL << (bw - 1));
-            res ^= bb;
-            res ^= 1;
-            iopack->io->recv_data(&res_t, sizeof(uint8_t));
-            iopack->io->send_data(&res, sizeof(uint8_t));
-        }
-
-        if (res_t ^ res) {
-            i++;
-            swap(arr[i], arr[j]);
+            Zab[j - low] = (arr[j] - pivot) & mask_l;
+            compare_with[j - low] = (1ULL << (bw - 1)) - (Zab[j - low] & ((1ULL << (bw - 1)) - 1));
+            bab[j - low] = Zab[j - low] < (1ULL << (bw - 1));
         }
     }
-    swap(arr[i + 1], arr[high]);
-    return i + 1;
+    if (party == sci::ALICE) {
+        aux->mill->compare(res, compare_with, high - low, bw);
+        for (int j = low; j < high; j++) {
+            res[j - low] ^= bab[j - low];
+        }
+        pack_bits(res, x_packed_send, high - low);
+        iopack->io->send_data(x_packed_send, ttt * sizeof(uint8_t));
+        iopack->io->recv_data(x_packed_recv, ttt * sizeof(uint8_t));
+        unpack_bits(x_packed_recv, res_t, high - low);
+    } else {
+        aux->mill->compare(res, compare_with, high - low, bw);
+        for (int j = low; j < high; j++) {
+            res[j - low] ^= bab[j - low];
+            res[j - low] ^= 1;
+        }
+        iopack->io->recv_data(x_packed_recv, ttt * sizeof(uint8_t));
+        unpack_bits(x_packed_recv, res_t, high - low);
+        pack_bits(res, x_packed_send, high - low);
+        iopack->io->send_data(x_packed_send, ttt * sizeof(uint8_t));
+    }
+
+    int low_idx = 0;
+    int high_idx = high - low;
+    uint64_t* temp = new uint64_t[high - low + 1]();
+    for (int j = low; j < high; j++) {
+        if (res_t[j - low] ^ res[j - low]) {
+            temp[low_idx] = arr[j];
+            low_idx++;
+        }
+        else {
+            temp[high_idx] = arr[j];
+            high_idx--;
+        }
+    }
+    temp[low_idx] = arr[high];
+    for (int j = low; j <= high;j++) {
+        arr[j] = temp[j - low];
+    }
+
+    delete[] temp;
+    delete[] res;
+    delete[] res_t;
+    delete[] Zab;
+    delete[] compare_with;
+    delete[] bab;
+    delete[] x_packed_recv;
+    delete[] x_packed_send;
+    return low + low_idx;
 }
 
 // Top-k select function: modifies arr in-place so top k elements are at arr[0..k-1]
-void Frequency::topKSelect(uint64_t *arr, int low, int high, int k, int bw) {
+int Frequency::topKSelect(uint64_t *arr, int low, int high, int k, int bw) {
     if (low <= high) {
         int pi = partitionTopK(arr, low, high, bw);
         int left_count = pi - low + 1; // number of elements >= pivot
 
         if (left_count == k) {
-            return; // top-k elements are arr[low..pi]
-        } else if (left_count > k) {
-            topKSelect(arr, low, pi - 1, k, bw); // top k are in left partition
-        } else {
-            topKSelect(arr, pi + 1, high, k - left_count, bw); // need more from right partition
+            return pi; // top-k elements are arr[low..pi]
         }
+        if (left_count > k) {
+            return topKSelect(arr, low, pi - 1, k, bw); // top k are in left partition
+        }
+        return topKSelect(arr, pi + 1, high, k - left_count, bw); // need more from right partition
     }
 }
 
@@ -3045,185 +3128,24 @@ void Frequency::count_kth(uint64_t *res, uint64_t *frequency, int k, int num_sta
 
 
 // linear
-// void Frequency::count_kth_linear(uint64_t *res, uint64_t *frequency, int k, int num_stand, int num_data,
-//                           int32_t bw_data, int32_t bw_res) {
-//     cout << endl << "K: " << k << endl;
-//     bool flag = false;
-//     if (num_stand % 2 == 0) {
-//         num_stand += 1;
-//         flag = true;
-//     }
-//     uint64_t *endpoints = new uint64_t[num_stand]();
-//     uint64_t *endpoints_temp = new uint64_t[(num_stand + 1) / 2]();
-//     uint64_t *endpoints_temp2 = new uint64_t[(num_stand + 1) / 2]();
-//     endpoints[0] = frequency[0];
-//     if (flag) {
-//         for (int i = 1; i < num_stand - 1; i++) {
-//             endpoints[i] = endpoints[i - 1] + frequency[i];
-//             endpoints[i] &= (1ULL << bw_res) - 1;
-//         }
-//         xt->z_extend(num_stand - 1, endpoints, endpoints, bw_res, bw_res + 1);
-//         endpoints[num_stand - 1] = endpoints[num_stand - 2];
-//     } else {
-//         for (int i = 1; i < num_stand; i++) {
-//             endpoints[i] = endpoints[i - 1] + frequency[i];
-//             endpoints[i] &= (1ULL << bw_res) - 1;
-//         }
-//         xt->z_extend(num_stand, endpoints, endpoints, bw_res, bw_res + 1);
-//     }
-//     bw_res += 1;
-//
-//     cout << "endpoints: " << endl;
-//     for (int i = 0; i < num_stand; i++) {
-//         cout << endpoints[i] << ", ";
-//     }
-//     cout << endl;
-//
-//     int depth = 0;
-//     int size = num_stand;
-//     int mid_idx = size / 2; // choose the middle element
-//     uint64_t temp = 0;
-//     uint8_t *temp_t = new uint8_t[num_stand]();
-//     uint8_t *res_tree = new uint8_t[num_stand];
-//     while (true) {
-//         if (size <= 3) {
-//             uint8_t *res_t = new uint8_t[size]();
-//             uint64_t *temp_t64 = new uint64_t[size]();
-//             for (int i = 0; i < size; i++) {
-//                 if (party == ALICE) {
-//                     temp_t64[i] = endpoints[i] - k;
-//                 } else {
-//                     temp_t64[i] = endpoints[i];
-//                 }
-//             }
-//             aux->wrap_computation(temp_t64, res_t, size, bw_res - 1);
-//             for (int i = 0; i < size; i++) {
-//                 if (party == ALICE) {
-//                     res_t[i] ^= ((endpoints[i] >> (bw_res - 1)) & 1);
-//                 } else {
-//                     res_t[i] ^= ((endpoints[i] >> (bw_res - 1)) & 1);
-//                     res_t[i] ^= 1;
-//                 }
-//             }
-//
-//
-//             cout << endl << "the last 3 elements: " << endl;
-//             for (int i = 0; i < size; i++) {
-//                 cout << (int)res_t[i] << ", ";
-//             }
-//             cout << endl;
-//
-//
-//             aux->B2A(res_t, temp_t64, size, bw_res); // bw_res should equals to the log(num_stand)
-//             for (int i = 0; i < size; i++) {
-//                 res[0] += temp_t64[i];
-//             }
-//             res[0] &= (1ULL << bw_res) - 1;
-//             delete[] temp_t64;
-//             delete[] res_t;
-//             break;
-//         }
-//         if (party == ALICE) {
-//             temp = endpoints[mid_idx] - k;
-//             aux->wrap_computation(&temp, &res_tree[depth], 1, bw_res - 1);
-//             res_tree[depth] ^= ((endpoints[mid_idx] >> (bw_res - 1)) & 1);
-//         } else {
-//             temp = endpoints[mid_idx];
-//             aux->wrap_computation(&temp, &res_tree[depth], 1, bw_res - 1);
-//             res_tree[depth] ^= ((endpoints[mid_idx] >> (bw_res - 1)) & 1);
-//             res_tree[depth] ^= 1;
-//         }
-//
-//         cout << endl;
-//         cout << "mid_value: " << endpoints[mid_idx] << endl;
-//         cout << "tree decision: " << (int)res_tree[depth] << endl;
-//         cout << endl;
-//
-//         // mux two array with length (size + 1) / 2
-//         for (int j = 0; j < (size + 1) / 2; j++) {
-//             endpoints_temp[j] = endpoints[size / 2 + j] - endpoints[j];
-//         }
-//         if (party == ALICE) {
-//             std::fill(temp_t, temp_t + (size + 1) / 2, res_tree[depth]);
-//         } else {
-//             std::fill(temp_t, temp_t + (size + 1) / 2, res_tree[depth] ^ 1);
-//         }
-//         aux->multiplexer(temp_t, endpoints_temp, endpoints_temp2, (size + 1) / 2, bw_res, bw_res);
-//
-//         for (int j = 0; j < (size + 1) / 2; j++) {
-//             endpoints[j] += endpoints_temp2[j];
-//             endpoints[j] &= (1ULL << bw_res) - 1;
-//         }
-//         size = (size + 1) / 2;
-//         if (size % 2 == 0) {
-//             endpoints[size] = endpoints[size - 1];
-//             size += 1;
-//         }
-//         mid_idx = size / 2;
-//         depth += 1;
-//
-//         cout << endl;
-//         for (int j = 0; j < size; j++) {
-//             cout << endpoints[j] << ", ";
-//         }
-//         cout << endl;
-//     }
-//
-//     // temp2 used for the tree decision value append
-//     uint64_t *temp2 = new uint64_t[depth]();
-//     int t = 0;
-//     size = num_stand;
-//     while (true) {
-//         if (size <= 3) {
-//             break;
-//         }
-//         temp2[t] = size / 2;
-//         size = (size + 1) / 2;
-//         if (size % 2 == 0) {
-//             size += 1;
-//         }
-//         t += 1;
-//     }
-//
-//     if (party == ALICE) {
-//         for (int i1 = 0; i1 < depth; i1++) {
-//             res_tree[i1] ^= 1;
-//         }
-//     }
-//
-//
-//     cout << endl << "append value: " << endl;
-//     for (int i1 = 0; i1 < depth; i1++) {
-//         cout << temp2[i1] << ", ";
-//     }
-//     cout << endl;
-//
-//     cout << endl << "res_tree: " << endl;
-//     for (int i1 = 0; i1 < depth; i1++) {
-//         cout << (int) res_tree[i1] << ", ";
-//     }
-//     cout << endl;
-//
-//     aux->multiplexer_two_plain(res_tree, temp2, temp2, depth, bw_res, bw_res);
-//     for (int i = 0; i < depth; i++) {
-//         res[0] += temp2[i];
-//     }
-//
-//     if (party == ALICE) {
-//         res[0] -= 1;
-//     }
-//
-//     res[0] &= (1ULL << bw_res) - 1;
-//
-//
-//     cout << endl;
-//     cout << "res[0]: " << res[0] << endl;
-//
-//
-//     delete [] endpoints;
-//     delete [] endpoints_temp;
-//     delete [] endpoints_temp2;
-//     delete[] temp_t;
-//     delete [] res_tree;
-//     delete[] temp2;
-// }
+void Frequency::count_kth_linear(uint64_t *res, uint64_t *frequency, int k, int num_stand, int num_data,
+                          int32_t bw_data, int32_t bw_res) {
+    cout << endl << "K: " << k << endl;
+    uint64_t *endpoints = new uint64_t[num_stand]();
+    endpoints[0] = frequency[0];
+    for (int i = 1; i < num_stand; i++) {
+        endpoints[i] = endpoints[i - 1] + frequency[i];
+        endpoints[i] &= (1ULL << bw_res) - 1;
+    }
+    xt->z_extend(num_stand, endpoints, endpoints, bw_res, bw_res + 1);
+    bw_res += 1;
+    cout << "endpoints: " << endl;
+    for (int i = 0; i < num_stand; i++) {
+        cout << endpoints[i] << ", ";
+    }
+    cout << endl;
+
+
+
+    delete [] endpoints;
+}

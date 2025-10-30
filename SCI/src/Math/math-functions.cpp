@@ -1651,6 +1651,239 @@ void MathFunctions::ln_v2(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, i
 }
 
 
+void MathFunctions::ln_v1(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, int32_t bw_y, int32_t s_x, int32_t s_y) {
+    int32_t bw_adjust = bw_x - 1;
+    uint64_t mask_adjust = (bw_adjust == 64 ? -1 : ((1ULL << bw_adjust) - 1));
+    // MSB is always 0, thus, not including it
+    uint8_t *msnzb_vector_bool = new uint8_t[dim * (bw_x - 1)];
+    uint64_t *msnzb_vector = new uint64_t[dim * (bw_x - 1)];
+    uint64_t *msnzb_index = new uint64_t[dim];
+    aux->msnzb_one_hot_index(x, msnzb_vector_bool, msnzb_index, bw_x - 1, dim);
+    aux->B2A(msnzb_vector_bool, msnzb_vector, dim * (bw_x - 1), bw_x - 1);
+    uint64_t *adjust = new uint64_t[dim];
+    uint8_t *exp_parity = new uint8_t[dim];
+    for (int i = 0; i < dim; i++) {
+        adjust[i] = 0;
+        exp_parity[i] = 0;
+        for (int j = 0; j < (bw_x - 1); j++) {
+            adjust[i] += (1ULL << (bw_x - 2 - j)) * msnzb_vector[i * (bw_x - 1) + j];
+            if (((j - s_x) & 1)) {
+                exp_parity[i] ^= msnzb_vector_bool[i * (bw_x - 1) + j];
+            }
+        }
+        adjust[i] &= mask_adjust;
+    }
+
+    // adjusted_x: bw = bw_x - 1, scale = bw_x - 2, adjusted_x is the value in [1, 2).
+    uint64_t *adjusted_x = new uint64_t[dim];
+    uint64_t *tmp = new uint64_t[dim];
+    uint8_t *tmp_bool = new uint8_t[dim];
+    uint64_t *r_convert = new uint64_t[dim];
+    uint64_t *tmp2 = new uint64_t[dim]();
+    uint64_t *tmp4 = new uint64_t[dim]();
+    uint64_t *res = new uint64_t[dim]();
+    mult->hadamard_product(dim, x, adjust, tmp, bw_x - 1, bw_x - 1,
+                           bw_x - 1, false, false, MultMode::None);
+
+    // adjusted_x is now [1, 2) reduce into a more narrow range.
+    // compare with 1/2 get the comparison result which used for the following selection for ln x
+    trunc->div_pow2(dim, tmp, adjusted_x, 1, bw_x - 1);
+
+
+    for (int i = 0; i < dim; i++) {
+        res[i] = (1ULL << (bw_x - 2)) - adjusted_x[i];
+    }
+
+
+    // cout << endl;
+    // cout << "adjust_x [-0.5-1): ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << adjusted_x[i] << ", ";
+    // }
+    // cout << endl;
+
+
+    // Taylor series
+    uint64_t *resP2 = new uint64_t[dim]();
+    uint64_t *resP3 = new uint64_t[dim]();
+    uint64_t *resP4 = new uint64_t[dim]();
+    uint64_t *resP5 = new uint64_t[dim]();
+    // uint64_t *temp_constant = new uint64_t[dim]();
+    uint64_t *approx_value = new uint64_t[dim]();
+
+    auto x_comm = iopack->get_comm();
+
+    mult->hadamard_product(dim, res, res, tmp, bw_x - 2, bw_x - 2, 2 * (bw_x - 2));
+    trunc->truncate_and_reduce(dim, tmp, resP2, bw_x - 2, 2 * (bw_x - 2));
+    // trunc->truncate_direct(dim, tmp, resP2, bw_x - 2, 2 * (bw_x - 2));
+
+    mult->hadamard_product(dim, res, resP2, resP3, bw_x - 2, bw_x - 2, 2 * (bw_x - 2));
+    trunc->truncate_and_reduce(dim, resP3, resP3, bw_x - 2, 2 * (bw_x - 2));
+    // trunc->truncate_direct(dim, resP3, resP3, bw_x - 2, 2 * (bw_x - 2));
+
+    mult->hadamard_product(dim, resP2, resP2, resP4, bw_x - 2, bw_x - 2, 2 * (bw_x - 2));
+    trunc->truncate_and_reduce(dim, resP4, resP4, bw_x - 2, 2 * (bw_x - 2));
+    // trunc->truncate_direct(dim, resP4, resP4, bw_x - 2, 2 * (bw_x - 2));
+
+
+    mult->hadamard_product(dim, resP2, resP3, resP5, bw_x - 2, bw_x - 2, 2 * (bw_x - 2));
+    trunc->truncate_and_reduce(dim, resP5, resP5, bw_x - 2, 2 * (bw_x - 2));
+    // trunc->truncate_direct(dim, resP5, resP5, bw_x - 2, 2 * (bw_x - 2));
+
+
+    trunc->div_pow2(dim, resP2, tmp, 1, bw_x - 2);
+
+    // aux->wrap_computation(resP3, tmp_bool, dim, bw_x - 2);
+    // aux->multiplexer_two_plain(tmp_bool, ((1 << (bw_x - 2)) / 3), tmp4, dim, bw_x - 2, bw_x - 2);
+    // for (int i = 0; i < dim; i++) {
+    //     resP3[i] /= 3;
+    //     resP3[i] -= tmp4[i];
+    //     resP3[i] &= (mask_adjust >> 1);
+    // }
+
+    aux->wrap_computation(resP3, tmp_bool, dim, bw_x - 2);
+    aux->multiplexer_two_plain(tmp_bool, ((1ULL << (bw_x - 2)) / 3), tmp4, dim, bw_x - 2, bw_x - 2);
+    for (int i = 0; i < dim; i++) {
+        resP3[i] = resP3[i] * ((1ULL << (bw_x - 2)) / 3);
+        resP3[i] -= tmp4[i] << (bw_x - 2);
+    }
+    trunc->truncate_and_reduce(dim, resP3, resP3, bw_x - 2, 2 * (bw_x - 2));
+    // trunc->truncate_direct(dim, resP3, resP3, bw_x - 2, 2 * (bw_x - 2));
+
+
+    trunc->div_pow2(dim, resP4, tmp2, 2, bw_x - 2);
+
+    // aux->wrap_computation(resP5, tmp_bool, dim, bw_x - 2);
+    // aux->multiplexer_two_plain(tmp_bool, ((1ULL << (bw_x - 2)) / 5), tmp4, dim, bw_x - 2, bw_x - 2);
+    // for (int i = 0; i < dim; i++) {
+    //     resP5[i] /= 5;  // divide will occur 0 to be 0.9999xx
+    //     resP5[i] -= tmp4[i];
+    //     resP5[i] &= (mask_adjust >> 1);
+    // }
+
+    aux->wrap_computation(resP5, tmp_bool, dim, bw_x - 2);
+    aux->multiplexer_two_plain(tmp_bool, ((1ULL << (bw_x - 2)) / 5), tmp4, dim, bw_x - 2, bw_x - 2);
+    for (int i = 0; i < dim; i++) {
+        resP5[i] = resP5[i] * ((1ULL << (bw_x - 2)) / 5);
+        resP5[i] -= tmp4[i] << (bw_x - 2);
+    }
+    trunc->truncate_and_reduce(dim, resP5, resP5, bw_x - 2, 2 * (bw_x - 2));
+    // trunc->truncate_direct(dim, resP5, resP5, bw_x - 2, 2 * (bw_x - 2));
+
+    // cout << endl;
+    // cout << "res: ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << res[i] << ", ";
+    // }
+    // cout << endl;
+    //
+    // cout << endl;
+    // cout << "tmp: ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << tmp[i] << ", ";
+    // }
+    // cout << endl;
+    //
+    // cout << endl;
+    // cout << "resP3: ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << resP3[i] << ", ";
+    // }
+    // cout << endl;
+    //
+    // cout << endl;
+    // cout << "tmp2: ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << tmp2[i] << ", ";
+    // }
+    // cout << endl;
+    // cout << endl;
+    // cout << "resP5: ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << resP5[i] << ", ";
+    // }
+    // cout << endl;
+
+
+    for (int i = 0; i < dim; i++) {
+        approx_value[i] = res[i] - tmp[i] + resP3[i] - tmp2[i] + resP5[i];
+        approx_value[i] &= (mask_adjust >> 1);
+    }
+
+
+    // combine the final result
+    // convert the scale back to s_x
+    trunc->truncate_and_reduce(dim, approx_value, approx_value, bw_x - 2 - 16, (bw_x - 2));
+    // trunc->truncate_direct(dim, approx_value, approx_value, bw_x - 2 - 16, (bw_x - 2));
+    xt->z_extend(dim, approx_value, approx_value, 16, bw_x);
+
+    // cout << endl;
+    // cout << "approx_value: ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << approx_value[i] << ", ";
+    // }
+    // cout << endl;
+    auto y_comm = iopack->get_comm();
+    cout << "comm: " << y_comm - x_comm << endl;
+
+    // the t
+    int msnzb_index_bits = ceil(log2(bw_x));
+    uint64_t *tmp5 = new uint64_t[dim]();
+    for (int i = 0; i < dim; i++) {
+        msnzb_index[i] *= (1 << s_x);
+    }
+    xt->z_extend(dim, msnzb_index, msnzb_index, s_x + msnzb_index_bits, bw_x);
+
+
+    for (int i = 0; i < dim; i++) {
+        tmp5[i] = msnzb_index[i] * (uint64_t) (log(2.0) * (1 << (s_x)));
+    }
+    trunc->truncate_and_reduce(dim, tmp5, tmp5, s_x, bw_x + s_x);
+    aux->wrap_computation(msnzb_index, tmp_bool, dim, bw_x);
+    aux->multiplexer_two_plain(
+        tmp_bool, (((uint64_t) (log(2.0) * (1ULL << (s_x)))) << (bw_x - s_x)) & ((1ULL << bw_x) - 1), tmp, dim, bw_x,
+        bw_x);
+    for (int i = 0; i < dim; i++) {
+        tmp5[i] -= tmp[i];
+    }
+
+    if (party == ALICE) {
+        for (int i = 0; i < dim; i++) {
+            tmp5[i] -= (uint64_t) (16 * log(2.0) * (1 << s_x));
+        }
+    }
+
+    for (int i = 0; i < dim; i++) {
+        tmp5[i] &= ((1ULL << bw_x) - 1);
+    }
+
+
+    for (int i = 0; i < dim; i++) {
+        y[i] = tmp5[i] + tmp4[i];
+        y[i] &= (1ULL << bw_x) - 1;
+    }
+
+    delete[] tmp;
+    delete[] tmp2;
+    delete[] tmp4;
+    delete[] tmp5;
+    delete[] res;
+    delete[] resP2;
+    delete[] resP3;
+    delete[] resP4;
+    delete[] resP5;
+    delete[] approx_value;
+    delete[] r_convert;
+    delete[] adjusted_x;
+    delete[] msnzb_vector_bool;
+    delete[] msnzb_vector;
+    delete[] msnzb_index;
+    delete[] exp_parity;
+    delete[] adjust;
+    delete[] tmp_bool;
+}
+
+
 // uint64_t interval_endpoints[7] = {1 << 4, 1 << 8, 1 << 12, 1 << 16, 1 << 20, 1 << 24, 1 << 28};
 // // the init values setting is not perfect if we only refer to the plaintext computation setting, in the MPC setting
 // // the current setting gives no better approximate after iterations.

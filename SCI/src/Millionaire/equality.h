@@ -115,7 +115,6 @@ public:
     void check_equality(uint8_t *res_eq, uint64_t *data, int num_eqs,
                         int bitlength, int radix_base = MILL_PARAM) {
         configure(bitlength, radix_base);
-
         if (bitlength <= beta) {
             bitlen_lt_beta(res_eq, data, num_eqs, bitlength, radix_base);
             return;
