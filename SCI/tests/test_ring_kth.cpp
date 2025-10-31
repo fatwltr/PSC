@@ -106,7 +106,8 @@ int main(int argc, char **argv) {
     uint64_t comm_second = iopack->get_comm();
 
     // we fix the k = n/4 here.
-    frequency->count_kth(&kth_value, res,4, num_stand, num_data, bw_data, bw_res);
+    // frequency->count_kth(&kth_value, res,num_data / 4, num_stand, num_data, bw_data, bw_res);
+    frequency->count_kth_linear(&kth_value, res,num_data / 4, num_stand, num_data, bw_data, bw_res);
 
     comm_second = iopack->get_comm() - comm_second;
     long long sort_time = time_from(sort_start);

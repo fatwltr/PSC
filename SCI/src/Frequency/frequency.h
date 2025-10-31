@@ -63,6 +63,9 @@ public:
     void count_sort(uint64_t *res, uint64_t *frequency, int num_stand, int num_data,
                     int32_t bw_data, int32_t bw_res);
 
+    void count_sort_v2(uint64_t *res, uint64_t *frequency, int num_stand, int num_data,
+                int32_t bw_data, int32_t bw_res);
+
     void shuffle_sort(uint64_t *res, uint64_t *data, int num_stand, int num_data,
                       int32_t bw_data, int32_t bw_res);
 

@@ -1236,7 +1236,9 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         auto **mux_choice = new uint8_t *[num_stand];
         for (int i = 0; i < num_stand; i++) {
             mux_choice[i] = new uint8_t[num_data]();
-#pragma omp parallel for
+        }
+#pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 0; i < num_stand; i++) {
             for (int j = 0; j < num_data; j++) {
                 mux_choice[i][j] = b[i * num_data * 2 + j + num_data] ^ b[i * num_data * 2 + j];
             }
@@ -1259,7 +1261,7 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
 
         // mux_choice padding a 0-string
         this->aux->multiplexer_bShr(t, mux_choice, uniShr, num_stand, num_data);
-#pragma omp parallel for
+#pragma omp parallel for collapse(2) schedule(static)
         for (int i = 0; i < num_stand; i++) {
             for (int j = 0; j < num_data; j++) {
                 uniShr[i][j] ^= b[i * num_data * 2 + j];
@@ -1289,6 +1291,7 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
 
         // generate the shift translation shares
         auto **shift_translate = new uint8_t *[num_data * 2];
+#pragma omp parallel for
         for (int i = 0; i < num_data * 2; i++) {
             shift_translate[i] = new uint8_t[save_memory]();
         }
@@ -1324,7 +1327,8 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
                         for (int l = 0; l < save_memory; l++) {
                             c[i * num_data * 2 + j] ^= shift_translate[
                                 (j - l - k * save_memory + num_data * 2) % (num_data * 2)][l];
-                            c[i * num_data * 2 + ((l + k * save_memory + endpoints[i] + 2 * num_data) % (2 * num_data))] ^=
+                            c[i * num_data * 2 + ((l + k * save_memory + endpoints[i] + 2 * num_data) % (2 * num_data))]
+                                    ^=
                                     shift_translate[j][l];
                         }
                     }
@@ -1424,7 +1428,9 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
         auto **mux_choice = new uint8_t *[num_stand];
         for (int i = 0; i < num_stand; i++) {
             mux_choice[i] = new uint8_t[num_data]();
-#pragma omp parallel for
+        }
+#pragma omp parallel for collapse(2) schedule(static)
+        for (int i = 0; i < num_stand; i++) {
             for (int j = 0; j < num_data; j++) {
                 mux_choice[i][j] = xMa[i * num_data * 2 + j] ^ xMa[i * num_data * 2 + j + num_data];
             }
@@ -1440,8 +1446,8 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
 
 
         this->aux->multiplexer_bShr(t, mux_choice, uniShr, num_stand, num_data);
+#pragma omp parallel for collapse(2) schedule(static)
         for (int i = 0; i < num_stand; i++) {
-#pragma omp parallel for
             for (int j = 0; j < num_data; j++) {
                 uniShr[i][j] ^= xMa[i * num_data * 2 + j];
             }
@@ -1529,6 +1535,430 @@ void Frequency::count_sort(uint64_t *res, uint64_t *frequency, int num_stand, in
     }
     // delete[] x;
     delete[] uniShr;
+    delete[] interval_indicate;
+}
+
+void Frequency::count_sort_v2(uint64_t *res, uint64_t *frequency, int num_stand, int num_data,
+                              int32_t bw_data, int32_t bw_res) {
+    int n_th = (omp_get_num_procs() - 8) / 2;
+    cout << "n_th = " << n_th << endl;
+    omp_set_num_threads(n_th);
+    uint64_t *endpoints = new uint64_t[num_stand]();
+    endpoints[0] = frequency[0];
+    for (int i = 1; i < num_stand; i++) {
+        endpoints[i] = endpoints[i - 1] + frequency[i];
+        endpoints[i] &= (1ULL << bw_res) - 1;
+    }
+
+    // cout << endl;
+    // for (int i = 0; i < num_stand; i++) {
+    //     cout << endpoints[i] << " ";
+    // }
+    // cout << endl;
+
+    num_data += 1; // for the translation that the 0 and num_data are different
+
+    // share conversion 2^bw_data -> num_data
+    uint8_t *t = new uint8_t[num_stand]();
+    uint64_t *appendix = new uint64_t[num_stand]();
+    this->aux->wrap_computation(endpoints, t, num_stand, bw_res);
+    std::vector<uint64_t> v(1, num_data);
+    this->aux->B2A_coprimes(t, appendix, num_stand, v);
+    // cout << endl;
+    // for (int i = 0; i < num_stand; i++) {
+    //     cout << (int) appendix[i] << " ";
+    // }
+    // cout << endl;
+#pragma omp parallel for
+    for (int i = 0; i < num_stand; i++) {
+        endpoints[i] = (endpoints[i] % num_data) + (num_data - (1ULL << bw_res) % num_data) * (appendix[i]);
+        endpoints[i] %= num_data;
+    }
+
+    // cout << num_data << " ";
+    // cout << endl;
+    // for (int i = 0; i < num_stand; i++) {
+    //     cout << endpoints[i] << " ";
+    // }
+    // cout << endl;
+
+    uint64_t mask_data = (bw_data == 64 ? -1 : ((1ULL << bw_data) - 1));
+    uint64_t mask_res = (bw_res == 64 ? -1 : ((1ULL << bw_res) - 1));
+    auto *seeds = new block128[num_stand * num_data]();
+    // auto *prg = new PRG128[num_stand * num_data * 2]();
+    // PRG128 prg;
+
+    auto *uniShr_A = new uint64_t [num_stand * num_data]();
+    auto **interval_indicate = new uint8_t *[num_stand];
+    for (int i = 0; i < num_stand; i++) {
+        interval_indicate[i] = new uint8_t[num_data]();
+    }
+    // int save_memory = num_data * 2 > 2048 ? 2048 : num_data * 2;
+
+    // int save_memory = num_data * 2 * num_data * 2 > 11ULL * 1024 * 1024 * 1024 ? 11ULL * 1024 * 1024 * 1024 / (num_data * 2) : num_data * 2;
+    // save_memory = save_memory > num_data * 2 ? num_data * 2 : save_memory;
+
+    uint64_t mem_limit = 3ULL * 1024 * 1024 * 1024; // 3 GiB
+    uint64_t total = static_cast<uint64_t>(num_data) * num_data;
+
+    uint64_t save_memory64 = total > mem_limit
+                                 ? mem_limit / (static_cast<uint64_t>(num_data))
+                                 : static_cast<uint64_t>(num_data);
+
+    uint64_t save_memory = save_memory64;
+
+    cout << "save_memory = " << save_memory << endl;
+
+    if (party == sci::ALICE) {
+        // do not need to generate a num_data seed, we can set the second half seed directly as offset < num_data
+        this->aux->nMinus1OUTNOT_batch(seeds, num_stand, num_data, nullptr);
+        // generate the shift translation shares
+
+        // cout << "------" << endl;
+        // cout << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data; j++) {
+        //         print_block_(seeds[i * num_data + j]);
+        //     }
+        // }
+        // cout << endl;
+
+
+        auto *a = new uint8_t [num_data * num_stand]();
+        auto *b = new uint8_t [num_data * num_stand]();
+
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data; j++) {
+        //         prg[i * num_data + j].reseed(&seeds[i * num_data + j]);
+        //     }
+        // }
+#pragma omp parallel
+        {
+            PRG128 prg;
+            auto **shift_translate = new uint8_t *[num_data];
+            for (int i = 0; i < num_data; i++) {
+                shift_translate[i] = new uint8_t[save_memory]();
+            }
+#pragma omp for schedule(static)
+            for (int i = 0; i < num_stand; i++) {
+                for (int k = 0; k < (num_data / save_memory); k++) {
+                    for (int j = 0; j < num_data; j++) {
+                        prg.reseed(&seeds[i * num_data + j]);
+                        prg.random_bool((bool *) shift_translate[j], save_memory);
+                    }
+
+                    // cout << "shift_translate" << endl;
+                    // for (int j = 0; j < num_data; j++) {
+                    //     for (int l = 0; l < save_memory; l++) {
+                    //         cout << (int) shift_translate[j][l] << " ";
+                    //     }
+                    //     cout << endl;
+                    // }
+
+                    for (int j = 0; j < num_data; j++) {
+                        for (int l = 0; l < save_memory; l++) {
+                            a[i * num_data + l + k * save_memory] ^= shift_translate[j][l];
+                            b[i * num_data + j] ^= shift_translate[
+                                (j - l - k * save_memory + num_data) % (num_data)][l];
+                        }
+                    }
+                }
+                int last = num_data % save_memory;
+                if (last == 0) {
+                    continue;
+                }
+                int k = (num_data / save_memory);
+                for (int j = 0; j < num_data; j++) {
+                    prg.reseed(&seeds[i * num_data + j]);
+                    prg.random_bool((bool *) shift_translate[j], last);
+                }
+                // cout << "shift_translate" << endl;
+                // for (int j = 0; j < num_data; j++) {
+                //     for (int l = 0; l < last; l++) {
+                //         cout << (int) shift_translate[j][l] << " ";
+                //     }
+                //     cout << endl;
+                // }
+                for (int j = 0; j < num_data; j++) {
+                    for (int l = 0; l < last; l++) {
+                        a[i * num_data + l + k * save_memory] ^= shift_translate[j][l];
+                        b[i * num_data + j] ^= shift_translate[
+                            (j - l - k * save_memory + num_data) % (num_data)][l];
+                    }
+                }
+            }
+            for (int i = 0; i < num_data; i++) {
+                delete[] shift_translate[i];
+            }
+            delete[] shift_translate;
+        }
+        // cout << endl;
+        // cout << "----------x---------------" << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data; j++) {
+        //         cout << (int) x[i][j] << ", ";
+        //     }
+        //     cout << endl;
+        // }
+
+        // cout << endl;
+        // cout << "----------a---------------" << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data; j++) {
+        //         cout << (int) a[i][j] << ", ";
+        //     }
+        //     cout << endl;
+        // }
+
+        auto *x = new uint8_t [num_data * num_stand]();
+        for (int i = 0; i < num_stand; i++) {
+            x[i * num_data + endpoints[i]] = 1;
+        }
+
+#pragma omp parallel for
+        for (int j = 0; j < num_stand * num_data; j++) {
+            x[j] = x[j] ^ a[j];
+            if ((j + 1) % num_data == 0) {
+                continue;
+            }
+            b[j - j / num_data] = b[j];
+        }
+        // cout << endl;
+        // cout << "----------xMa---------------" << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data; j++) {
+        //         cout << (int) x[i][j] << ", ";
+        //     }
+        //     cout << endl;
+        // }
+
+
+        // cout << endl;
+        // cout << "------------b-------------" << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data; j++) {
+        //         cout << (int) b[i][j] << ", ";
+        //     }
+        //     cout << endl;
+        // }
+
+
+        uint8_t *x_packed = new uint8_t[(num_data * num_stand + 7) / 8]();
+        pack_bits(x, x_packed, num_stand * num_data);
+        iopack->io->send_data(x_packed, ((num_data * num_stand + 7) / 8) * sizeof(uint8_t));
+
+        // the result is >=
+        // cout << "t: " << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     cout << (int)t[i] << " ";
+        // }
+        // cout << endl;
+
+        aux->B2A(b, uniShr_A, num_stand * (num_data - 1), bw_data);
+
+
+        delete[] x_packed;
+        delete[] x;
+        delete[] a;
+        delete[] b;
+    } else {
+        this->aux->nMinus1OUTNOT_batch(seeds, num_stand, num_data, endpoints);
+
+        // cout << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     cout << endpoints[i] << endl;
+        //     for (int j = 0; j < num_data; j++) {
+        //         print_block_(seeds[i * num_data + j]);
+        //     }
+        // }
+        // cout << endl;
+
+        // generate the shift translation shares
+        auto **shift_translate = new uint8_t *[num_data];
+#pragma omp parallel for
+        for (int i = 0; i < num_data; i++) {
+            shift_translate[i] = new uint8_t[save_memory]();
+        }
+        auto *c = new uint8_t [num_stand * num_data]();
+
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data; j++) {
+        //         prg.reseed(&seeds[i * num_data + j]);
+        //     }
+        // }
+#pragma omp parallel
+        {
+            PRG128 prg;
+            auto **shift_translate = new uint8_t *[num_data];
+            for (int i = 0; i < num_data; i++) {
+                shift_translate[i] = new uint8_t[save_memory]();
+            }
+#pragma omp for schedule(static)
+            for (int i = 0; i < num_stand; i++) {
+                for (int k = 0; k < (num_data / save_memory); k++) {
+                    for (int j = 0; j < num_data; j++) {
+                        prg.reseed(&seeds[i * num_data + j]);
+                        prg.random_bool((bool *) shift_translate[j], save_memory);
+                    }
+                    // cout << "shift_translate" << endl;
+                    // for (int j = 0; j < num_data * 2; j++) {
+                    //     for (int l = 0; l < save_memory; l++) {
+                    //         cout << (int) shift_translate[j][l] << " ";
+                    //     }
+                    //     cout << endl;
+                    // }
+                    for (int j = 0; j < num_data; j++) {
+                        for (int l = 0; l < save_memory; l++) {
+                            c[i * num_data + j] ^= shift_translate[
+                                (j - l - k * save_memory + num_data) % num_data][l];
+                            c[i * num_data + ((l + k * save_memory + endpoints[i] + num_data) % num_data)]
+                                    ^= shift_translate[j][l];
+                        }
+                    }
+                }
+                int last = num_data % save_memory;
+                if (last == 0) {
+                    continue;
+                }
+                int k = (num_data / save_memory);
+                for (int j = 0; j < num_data; j++) {
+                    if (j == endpoints[i]) {
+                        std::fill(shift_translate[j], shift_translate[j] + save_memory, 0);
+                        continue;
+                    }
+                    prg.reseed(&seeds[i * num_data + j]);
+                    prg.random_bool((bool *) shift_translate[j], last);
+                }
+                // cout << "shift_translate" << endl;
+                // for (int j = 0; j < num_data; j++) {
+                //     for (int l = 0; l < last; l++) {
+                //         cout << (int) shift_translate[j][l] << " ";
+                //     }
+                //     cout << endl;
+                // }
+                for (int j = 0; j < num_data; j++) {
+                    for (int l = 0; l < last; l++) {
+                        c[i * num_data + j] ^= shift_translate[
+                            (j - l - k * save_memory + num_data) % (num_data)][l];
+                        c[i * num_data + (l + k * save_memory + endpoints[i]) % (num_data)] ^=
+                                shift_translate[j][l];
+                    }
+                }
+            }
+            for (int i = 0; i < num_data; i++) {
+                delete[] shift_translate[i];
+            }
+            delete[] shift_translate;
+        }
+
+        // cout << endl;
+        // cout << "------------c-------------" << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data; j++) {
+        //         cout << (int) c[i][j] << ", ";
+        //     }
+        //     cout << endl;
+        // }
+
+        auto *xMa = new uint8_t [num_stand * num_data]();
+
+        auto *shift_xMa = new uint8_t [num_stand * num_data];
+        auto *xMa_packed = new uint8_t[(num_data * num_stand + 7) / 8];
+        iopack->io->recv_data(xMa_packed, ((num_data * num_stand + 7) / 8) * sizeof(uint8_t));
+        unpack_bits(xMa_packed, xMa, num_stand * num_data);
+
+        // cout << endl;
+        // cout << "------------xMa-------------" << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data; j++) {
+        //         cout << (int) xMa[i][j] << ", ";
+        //     }
+        //     cout << endl;
+        // }
+
+        for (int i = 0; i < num_stand; i++) {
+            std::memcpy(shift_xMa + i * num_data, xMa + i * num_data + (num_data - endpoints[i]),
+                        endpoints[i]);
+            std::memcpy(shift_xMa + i * num_data + endpoints[i], xMa + i * num_data,
+                        num_data - endpoints[i]);
+        }
+
+        // cout << endl;
+        // cout << "------------shift_xMa-------------" << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data; j++) {
+        //         cout << (int) shift_xMa[i][j] << ", ";
+        //     }
+        //     cout << endl;
+        // }
+
+#pragma omp parallel for
+        for (int j = 0; j < num_stand * num_data; j++) {
+            if ((j + 1) % num_data == 0) {
+                continue;
+            }
+            xMa[j - j / num_data] = c[j] ^ shift_xMa[j];
+        }
+
+
+        // cout << endl;
+        // cout << "---------c xor shift_xMa-----------" << endl;
+        // for (int i = 0; i < num_stand; i++) {
+        //     for (int j = 0; j < num_data; j++) {
+        //         cout << (int) xMa[i][j] << ", ";
+        //     }
+        //     cout << endl;
+        // }
+
+        aux->B2A(xMa, uniShr_A, num_stand * (num_data - 1), bw_data);
+
+
+        delete[] c;
+        delete[] xMa;
+        delete[] xMa_packed;
+        delete[] shift_xMa;
+    }
+    num_data -= 1;
+
+    // cout << endl;
+    // for (int i = 0; i < num_stand; i++) {
+    //     for (int j = 0; j < num_data; j++) {
+    //         cout << uniShr_A[i * num_data + j] << " ";
+    //     }
+    //     cout << endl;
+    // }
+    // cout << endl;
+
+#pragma omp parallel for
+    for (int i = 0; i < num_stand; i++) {
+        for (int j = 1; j < num_data; j++) {
+            uniShr_A[i * num_data + j] += uniShr_A[i * num_data + j - 1];
+        }
+    }
+#pragma omp parallel for
+    for (int j = 0; j < num_data; j++) {
+        res[j] = party == ALICE ? (1ULL << bw_data) - 1 : 0;
+        for (int i = 0; i < num_stand; i++) {
+            res[j] += uniShr_A[i * num_data + j];
+        }
+    }
+
+    // cout << "res: " << endl;
+    // for (int i = 0; i < num_data; i++) {
+    //     cout << (res[i] & ((1ULL << bw_data) - 1)) << " ";
+    // }
+    // cout << endl;
+    delete[] endpoints;
+    delete[] t;
+    delete[] appendix;
+    delete[] seeds;
+    // delete[] prg;
+    for (int i = 0; i < num_stand; i++) {
+        // delete[] x[i];
+        delete[] interval_indicate[i];
+    }
+    // delete[] x;
+    delete[] uniShr_A;
     delete[] interval_indicate;
 }
 
@@ -2398,19 +2828,18 @@ int Frequency::partition(uint64_t *arr, int low, int high, int bw) {
     }
     int low_idx = 0;
     int high_idx = high - low;
-    uint64_t* temp = new uint64_t[high - low + 1]();
+    uint64_t *temp = new uint64_t[high - low + 1]();
     for (int j = low; j < high; j++) {
         if (res_t[j - low] ^ res[j - low]) {
             temp[low_idx] = arr[j];
             low_idx++;
-        }
-        else {
+        } else {
             temp[high_idx] = arr[j];
             high_idx--;
         }
     }
     temp[low_idx] = arr[high];
-    for (int j = low; j <= high;j++) {
+    for (int j = low; j <= high; j++) {
         arr[j] = temp[j - low];
     }
     delete[] res;
@@ -2694,19 +3123,18 @@ int Frequency::partitionTopK(uint64_t *arr, int low, int high, int bw) {
 
     int low_idx = 0;
     int high_idx = high - low;
-    uint64_t* temp = new uint64_t[high - low + 1]();
+    uint64_t *temp = new uint64_t[high - low + 1]();
     for (int j = low; j < high; j++) {
         if (res_t[j - low] ^ res[j - low]) {
             temp[low_idx] = arr[j];
             low_idx++;
-        }
-        else {
+        } else {
             temp[high_idx] = arr[j];
             high_idx--;
         }
     }
     temp[low_idx] = arr[high];
-    for (int j = low; j <= high;j++) {
+    for (int j = low; j <= high; j++) {
         arr[j] = temp[j - low];
     }
 
@@ -2866,6 +3294,8 @@ void Frequency::count_kth(uint64_t *res, uint64_t *frequency, int k, int num_sta
                           int32_t bw_data, int32_t bw_res) {
     // bw_res leads to different network pack efficiency !
     // cout << endl << "K: " << k << endl;
+    int n_th = (omp_get_num_procs() - 8) / 2;
+    omp_set_num_threads(n_th);
     res[0] = 0;
     bool flag = false;
     if (num_stand % 2 == 0) {
@@ -2877,6 +3307,7 @@ void Frequency::count_kth(uint64_t *res, uint64_t *frequency, int k, int num_sta
     uint64_t *endpoints_temp2 = new uint64_t[(num_stand + 1) / 2]();
     endpoints[0] = frequency[0];
     if (flag) {
+#pragma omp parallel for
         for (int i = 1; i < num_stand - 1; i++) {
             endpoints[i] = endpoints[i - 1] + frequency[i];
             // endpoints[i] &= (1ULL << bw_res) - 1;
@@ -2884,6 +3315,7 @@ void Frequency::count_kth(uint64_t *res, uint64_t *frequency, int k, int num_sta
         xt->z_extend(num_stand - 1, endpoints, endpoints, bw_res, bw_res + 1);
         endpoints[num_stand - 1] = endpoints[num_stand - 2];
     } else {
+#pragma omp parallel for
         for (int i = 1; i < num_stand; i++) {
             endpoints[i] = endpoints[i - 1] + frequency[i];
             // endpoints[i] &= (1ULL << bw_res) - 1;
@@ -3026,6 +3458,7 @@ void Frequency::count_kth(uint64_t *res, uint64_t *frequency, int k, int num_sta
         // cout << endl;
 
         // mux two array with length (size + 1) / 2
+#pragma omp parallel for
         for (int j = 0; j < (size + 1) / 2; j++) {
             endpoints_temp[j] = endpoints[size / 2 + j] - endpoints[j];
         }
@@ -3037,7 +3470,7 @@ void Frequency::count_kth(uint64_t *res, uint64_t *frequency, int k, int num_sta
         }
         // we here use k independent mux, which leads to k\lambda, but we can actually reduce it to \lambda
         aux->multiplexer(temp_t, endpoints_temp, endpoints_temp2, (size + 1) / 2, bw_res, bw_res);
-
+#pragma omp parallel for
         for (int j = 0; j < (size + 1) / 2; j++) {
             endpoints[j] += endpoints_temp2[j];
             // endpoints[j] &= (1ULL << bw_res) - 1;
@@ -3129,8 +3562,7 @@ void Frequency::count_kth(uint64_t *res, uint64_t *frequency, int k, int num_sta
 
 // linear
 void Frequency::count_kth_linear(uint64_t *res, uint64_t *frequency, int k, int num_stand, int num_data,
-                          int32_t bw_data, int32_t bw_res) {
-    cout << endl << "K: " << k << endl;
+                                 int32_t bw_data, int32_t bw_res) {
     uint64_t *endpoints = new uint64_t[num_stand]();
     endpoints[0] = frequency[0];
     for (int i = 1; i < num_stand; i++) {
@@ -3138,14 +3570,90 @@ void Frequency::count_kth_linear(uint64_t *res, uint64_t *frequency, int k, int 
         endpoints[i] &= (1ULL << bw_res) - 1;
     }
     xt->z_extend(num_stand, endpoints, endpoints, bw_res, bw_res + 1);
-    bw_res += 1;
-    cout << "endpoints: " << endl;
-    for (int i = 0; i < num_stand; i++) {
-        cout << endpoints[i] << ", ";
+    bw_res += 1; // for the secret shared number to compare
+    // cout << "endpoints: " << endl;
+    // for (int i = 0; i < num_stand; i++) {
+    //     cout << endpoints[i] << ", ";
+    // }
+    // cout << endl;
+
+    auto *temp_t64 = new uint64_t[num_stand - 1]();
+    auto *temp_t264 = new uint64_t[num_stand - 1]();
+    auto *temp = new uint64_t[num_stand]();
+    auto *res_t = new uint8_t[num_stand - 1]();
+    auto *res_t1 = new uint8_t[num_stand - 1]();
+    auto *res_eq = new uint8_t[num_stand - 1]();
+    auto *res_tAND = new uint8_t[num_stand]();
+
+
+    for (int i = 0; i < num_stand - 1; i++) {
+        if (party == ALICE) {
+            temp_t64[i] = (endpoints[i] - k) & ((1ULL << (bw_res)) - 1);
+            temp_t264[i] = temp_t64[i] & ((1ULL << (bw_res - 1)) - 1);
+        } else {
+            temp_t64[i] = endpoints[i] & ((1ULL << (bw_res)) - 1);
+            temp_t264[i] = (1ULL << (bw_res - 1)) - (temp_t64[i] & ((1ULL << (bw_res - 1)) - 1));
+        }
     }
-    cout << endl;
+    // the secret share input for comparison is not correct when <a> = <b>
+    aux->mill_and_eq->compare_with_eq(res_t, res_eq, temp_t264, num_stand - 1, bw_res);
 
+    for (int i = 0; i < num_stand - 1; i++) {
+        if (party == ALICE) {
+            res_t[i] ^= 1; // this used to reverse the cmp result to get wa <= t/2 - wb
+            res_t[i] ^= (temp_t64[i] < (1ULL << (bw_res - 1)));
+        } else {
+            res_t[i] ^= (temp_t64[i] < (1ULL << (bw_res - 1)));
+        }
+    }
 
+    for (int i = 0; i < num_stand - 1; i++) {
+        if (party == ALICE) {
+            res_t[i] ^= 1;
+            res_eq[i] ^= 1;
+        }
+    }
 
+    aux->AND(res_t, res_eq, res_t, num_stand - 1);
+
+    for (int i = 0; i < num_stand - 1; i++) {
+        if (party == ALICE) {
+            res_t[i] ^= 1;
+        }
+    }
+
+    // res_t k <= x_0
+
+    if (party == ALICE) {
+        for (int i = 0; i < num_stand - 1; i++) {
+            res_t1[i] = res_t[i] ^ 1;
+        }
+        res_tAND[0] = res_t[0];
+        res_tAND[num_stand - 1] = res_t1[num_stand - 2];
+    } else {
+        for (int i = 0; i < num_stand - 1; i++) {
+            res_t1[i] = res_t[i];
+        }
+        res_tAND[0] = res_t[0];
+        res_tAND[num_stand - 1] = res_t1[num_stand - 2];
+    }
+
+    aux->AND(res_t + 1, res_t1, res_tAND + 1, num_stand - 2);
+
+    aux->B2A(res_tAND, temp, num_stand, bw_data);
+
+    for (int i = 0; i < num_stand;i++) {
+        res[0] += (temp[i] * (i + 1));
+    }
+
+    res[0] = party == ALICE ? res[0] -1 : res[0];
+
+    delete[] temp_t64;
+    delete[] temp;
+    delete[] temp_t264;
+    delete[] res_t;
+    delete[] res_t1;
+    delete[] res_tAND;
+    delete[] res_eq;
     delete [] endpoints;
 }

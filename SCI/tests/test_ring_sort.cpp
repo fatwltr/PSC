@@ -104,7 +104,8 @@ int main(int argc, char **argv) {
     auto sort_start = clock_start();
     uint64_t comm_second = iopack->get_comm();
 
-    frequency->count_sort(sorted_array, res, num_stand, num_data, bw_data, bw_res);
+    // frequency->count_sort(sorted_array, res, num_stand, num_data, bw_data, bw_res);
+    frequency->count_sort_v2(sorted_array, res, num_stand, num_data, bw_data, bw_res);
 
     comm_second = iopack->get_comm() - comm_second;
     long long sort_time = time_from(sort_start);
