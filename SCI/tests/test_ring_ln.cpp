@@ -31,6 +31,7 @@ using namespace std;
 
 int party, port = 32000;
 int num_threads = 4;
+int flag = 0;
 string address = "127.0.0.1";
 
 int dim = 100;
@@ -66,10 +67,11 @@ void ln_thread(int tid, uint64_t *x, uint64_t *y, int num_ops) {
     } else {
         math = new MathFunctions(party, iopackArr[tid], otpackArr[tid]);
     }
-    // math->ln_v1(num_ops, x, y, bw_x, bw_y, s_x, s_y);
-    math->ln_v2(num_ops, x, y, bw_x, bw_y, s_x, s_y);
-    // math->ln(num_ops, x, y, bw_x, bw_y, s_x, s_y);
-
+    if (flag == 1) {
+        math->ln_v1(num_ops, x, y, bw_x, bw_y, s_x, s_y);
+    } else {
+        math->ln_v2(num_ops, x, y, bw_x, bw_y, s_x, s_y);
+    }
     delete math;
 }
 
@@ -80,6 +82,7 @@ int main(int argc, char **argv) {
     amap.arg("r", party, "Role of party: ALICE = 1; BOB = 2");
     amap.arg("p", port, "Port Number");
     amap.arg("N", dim, "Number of sqrt operations");
+    amap.arg("flag", flag, "Number of sqrt operations");
     amap.arg("nt", num_threads, "Number of threads");
     amap.arg("ip", address, "IP Address of server (ALICE)");
 
@@ -114,7 +117,6 @@ int main(int argc, char **argv) {
     } else {
         uint64_t *x0 = new uint64_t[dim];
         iopackArr[0]->io->recv_data(x0, dim * sizeof(uint64_t));
-        // x[0] = 4294967312;
         // x[0] = (x[0] - x0[0]);
         // x[0] = 0b11000010;
 
@@ -123,7 +125,7 @@ int main(int argc, char **argv) {
         double step = (log_max - log_min) / (dim - 1);
 
         for (int i = 0; i < dim; i++) {
-            x[i] = (uint64_t)(std::pow(2, log_min + i * step) * (1 << s_x));
+            x[i] = (uint64_t) (std::pow(2, log_min + i * step) * (1 << s_x));
             x[i] &= (mask_x >> 1);
             x[i] = (x[i] - x0[i]);
         }

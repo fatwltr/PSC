@@ -14,7 +14,7 @@ LinearOT *prod;
 int dim = 1 << 16;
 int bwA = 32;
 int bwB = 32;
-int bwC = 32;
+int bwC = 64;
 
 uint64_t maskA = (bwA == 64 ? -1 : ((1ULL << bwA) - 1));
 uint64_t maskB = (bwB == 64 ? -1 : ((1ULL << bwB) - 1));
@@ -23,11 +23,16 @@ uint64_t maskC = (bwC == 64 ? -1 : ((1ULL << bwC) - 1));
 void test_hadamard_product(uint64_t *inA, uint64_t *inB,
                            bool signed_arithmetic = true) {
   uint64_t *outC = new uint64_t[dim];
+  auto *msbA = new uint8_t[dim]();
+  auto *msbB = new uint8_t[dim]();
 
 
   auto start = clock_start();
   uint64_t comm = iopack->get_comm();
-  prod->hadamard_product(dim, inA, inB, outC, bwA, bwB, bwC, signed_arithmetic);
+  // prod->hadamard_product(dim, inA, inB, outC, bwA, bwB, bwC, signed_arithmetic);
+  // prod->hadamard_product(dim, inA, inB, outC, bwA, bwB, bwC, signed_arithmetic, signed_arithmetic, MultMode::Alice_has_A);
+  prod->hadamard_product(dim, inA, inB, outC, bwA, bwB, bwC, signed_arithmetic, signed_arithmetic,
+    MultMode::None, msbA, msbB);
   comm = iopack->get_comm() - comm;
   long long t = time_from(start);
 

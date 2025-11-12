@@ -620,7 +620,19 @@ void MathFunctions::sqrt(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x,
     // MSB is always 0, thus, not including it
     uint8_t *msnzb_vector_bool = new uint8_t[dim * (bw_x - 1)];
     uint64_t *msnzb_vector = new uint64_t[dim * (bw_x - 1)];
+
+    auto start = clock_start();
+    uint64_t comm = iopack->get_comm();
+
     aux->msnzb_one_hot(x, msnzb_vector_bool, bw_x - 1, dim);
+
+    comm = iopack->get_comm() - comm;
+    long long t = time_from(start);
+
+    cout << "MSNZB Time\t" << t / (1000.0) << " ms" << endl;
+    cout << "MSNZB Bytes Sent\t" << comm << " bytes" << endl;
+
+
     // uint64_t *msnzb_index = new uint64_t[dim];
     // aux->msnzb_one_hot_index(x, msnzb_vector_bool, msnzb_index, bw_x - 1, dim);
     // cout << endl;
@@ -628,6 +640,10 @@ void MathFunctions::sqrt(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x,
     //     cout << (uint32_t)msnzb_vector_bool[i] << " ";
     // }
     // cout << endl;
+
+    start = clock_start();
+    comm = iopack->get_comm();
+
     aux->B2A(msnzb_vector_bool, msnzb_vector, dim * (bw_x - 1), bw_x - 1);
     uint64_t *adjust = new uint64_t[dim];
     uint8_t *exp_parity = new uint8_t[dim];
@@ -651,6 +667,13 @@ void MathFunctions::sqrt(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x,
     uint64_t *adjusted_x_m = new uint64_t[dim];
     trunc->truncate_and_reduce(dim, adjusted_x, adjusted_x_m, bw_x - m - 2,
                                bw_x - 2);
+
+    comm = iopack->get_comm() - comm;
+    t = time_from(start);
+
+    cout << "adjust x Time\t" << t / (1000.0) << " ms" << endl;
+    cout << "adjust x Bytes Sent\t" << comm << " bytes" << endl;
+
     // m + 1 bits will be input to the lookup table
     int32_t M = (1LL << (m + 1));
     uint64_t Y_mask = (1ULL << (m + SQRT_LOOKUP_SCALE + 1)) - 1;
@@ -729,6 +752,10 @@ void MathFunctions::sqrt(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x,
     uint64_t *b_curr = new uint64_t[dim];
     uint64_t *Y_curr = new uint64_t[dim];
     uint64_t *Y_sq = new uint64_t[dim];
+
+    start = clock_start();
+    comm = iopack->get_comm();
+
     for (int i = 0; i < iters; i++) {
         if (i == 0) {
             // Y_sq: bw = 2m + 2SQRT_LOOKUP_SCALE + 1, scale = 2m + 2SQRT_LOOKUP_SCALE
@@ -783,6 +810,13 @@ void MathFunctions::sqrt(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x,
         memcpy(b_prev, b_curr, dim * sizeof(uint64_t));
         memcpy(Y_prev, Y_curr, dim * sizeof(uint64_t));
     }
+
+
+    comm = iopack->get_comm() - comm;
+    t = time_from(start);
+
+    cout << "newton Time\t" << t / (1000.0) << " ms" << endl;
+    cout << "newton Bytes Sent\t" << comm << " bytes" << endl;
 
     int32_t bw_sqrt_adjust = bw_x / 2;
     uint64_t mask_sqrt_adjust =
@@ -1289,13 +1323,17 @@ void MathFunctions::exp(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x,
 //     delete[] tmp_bool;
 // }
 
-void MathFunctions::ln_v2(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, int32_t bw_y, int32_t s_x, int32_t s_y) {
+void MathFunctions::ln_v1(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, int32_t bw_y, int32_t s_x, int32_t s_y) {
     int32_t bw_adjust = bw_x - 1;
     uint64_t mask_adjust = (bw_adjust == 64 ? -1 : ((1ULL << bw_adjust) - 1));
     // MSB is always 0, thus, not including it
     uint8_t *msnzb_vector_bool = new uint8_t[dim * (bw_x - 1)];
     uint64_t *msnzb_vector = new uint64_t[dim * (bw_x - 1)];
     uint64_t *msnzb_index = new uint64_t[dim];
+
+    auto start = clock_start();
+    uint64_t comm = iopack->get_comm();
+
     aux->msnzb_one_hot_index(x, msnzb_vector_bool, msnzb_index, bw_x - 1, dim);
     aux->B2A(msnzb_vector_bool, msnzb_vector, dim * (bw_x - 1), bw_x - 1);
     uint64_t *adjust = new uint64_t[dim];
@@ -1419,6 +1457,14 @@ void MathFunctions::ln_v2(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, i
         res[i] += r_convert[i];
         res[i] &= (mask_adjust >> 1); // mask_adjust is 31 bits, set the result be [0, 0.25] for Taylor series
     }
+
+
+    comm = iopack->get_comm() - comm;
+    long long t = time_from(start);
+
+    cout << "MSNZB Time\t" << t / (1000.0) << " ms" << endl;
+    cout << "MSNZB Bytes Sent\t" << comm << " bytes" << endl;
+
 
     // cout << endl;
     // cout << "res [0-0.25]: ";
@@ -1650,14 +1696,17 @@ void MathFunctions::ln_v2(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, i
     delete[] tmp_bool;
 }
 
-
-void MathFunctions::ln_v1(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, int32_t bw_y, int32_t s_x, int32_t s_y) {
+void MathFunctions::ln_v2(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, int32_t bw_y, int32_t s_x, int32_t s_y) {
     int32_t bw_adjust = bw_x - 1;
     uint64_t mask_adjust = (bw_adjust == 64 ? -1 : ((1ULL << bw_adjust) - 1));
     // MSB is always 0, thus, not including it
     uint8_t *msnzb_vector_bool = new uint8_t[dim * (bw_x - 1)];
     uint64_t *msnzb_vector = new uint64_t[dim * (bw_x - 1)];
     uint64_t *msnzb_index = new uint64_t[dim];
+
+    auto start = clock_start();
+    uint64_t comm = iopack->get_comm();
+    // aux->msnzb_one_hot(x, msnzb_vector_bool, bw_x - 1, dim);
     aux->msnzb_one_hot_index(x, msnzb_vector_bool, msnzb_index, bw_x - 1, dim);
     aux->B2A(msnzb_vector_bool, msnzb_vector, dim * (bw_x - 1), bw_x - 1);
     uint64_t *adjust = new uint64_t[dim];
@@ -1673,158 +1722,332 @@ void MathFunctions::ln_v1(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, i
         }
         adjust[i] &= mask_adjust;
     }
-
     // adjusted_x: bw = bw_x - 1, scale = bw_x - 2, adjusted_x is the value in [1, 2).
     uint64_t *adjusted_x = new uint64_t[dim];
-    uint64_t *tmp = new uint64_t[dim];
-    uint8_t *tmp_bool = new uint8_t[dim];
-    uint64_t *r_convert = new uint64_t[dim];
-    uint64_t *tmp2 = new uint64_t[dim]();
-    uint64_t *tmp4 = new uint64_t[dim]();
-    uint64_t *res = new uint64_t[dim]();
-    mult->hadamard_product(dim, x, adjust, tmp, bw_x - 1, bw_x - 1,
+    mult->hadamard_product(dim, x, adjust, adjusted_x, bw_x - 1, bw_x - 1,
                            bw_x - 1, false, false, MultMode::None);
+    xt->z_extend(dim, adjusted_x, adjusted_x, bw_x - 1, bw_x);
+
+
+    comm = iopack->get_comm() - comm;
+    long long t = time_from(start);
+
+    cout << "MSNZB Time\t" << t / (1000.0) << " ms" << endl;
+    cout << "MSNZB Bytes Sent\t" << comm << " bytes" << endl;
+
 
     // adjusted_x is now [1, 2) reduce into a more narrow range.
     // compare with 1/2 get the comparison result which used for the following selection for ln x
-    trunc->div_pow2(dim, tmp, adjusted_x, 1, bw_x - 1);
-
-
-    for (int i = 0; i < dim; i++) {
-        res[i] = (1ULL << (bw_x - 2)) - adjusted_x[i];
-    }
-
 
     // cout << endl;
-    // cout << "adjust_x [-0.5-1): ";
+    // cout << "adjust_x [1-2): ";
     // for (int i = 0; i < dim; i++) {
     //     cout << adjusted_x[i] << ", ";
     // }
     // cout << endl;
 
-
-    // Taylor series
-    uint64_t *resP2 = new uint64_t[dim]();
-    uint64_t *resP3 = new uint64_t[dim]();
-    uint64_t *resP4 = new uint64_t[dim]();
-    uint64_t *resP5 = new uint64_t[dim]();
-    // uint64_t *temp_constant = new uint64_t[dim]();
-    uint64_t *approx_value = new uint64_t[dim]();
-
-    auto x_comm = iopack->get_comm();
-
-    mult->hadamard_product(dim, res, res, tmp, bw_x - 2, bw_x - 2, 2 * (bw_x - 2));
-    trunc->truncate_and_reduce(dim, tmp, resP2, bw_x - 2, 2 * (bw_x - 2));
-    // trunc->truncate_direct(dim, tmp, resP2, bw_x - 2, 2 * (bw_x - 2));
-
-    mult->hadamard_product(dim, res, resP2, resP3, bw_x - 2, bw_x - 2, 2 * (bw_x - 2));
-    trunc->truncate_and_reduce(dim, resP3, resP3, bw_x - 2, 2 * (bw_x - 2));
-    // trunc->truncate_direct(dim, resP3, resP3, bw_x - 2, 2 * (bw_x - 2));
-
-    mult->hadamard_product(dim, resP2, resP2, resP4, bw_x - 2, bw_x - 2, 2 * (bw_x - 2));
-    trunc->truncate_and_reduce(dim, resP4, resP4, bw_x - 2, 2 * (bw_x - 2));
-    // trunc->truncate_direct(dim, resP4, resP4, bw_x - 2, 2 * (bw_x - 2));
+    uint64_t *tmp = new uint64_t[dim];
+    uint8_t *gethan1 = new uint8_t[dim];
+    uint8_t *gethan2 = new uint8_t[dim];
+    uint8_t *gethan3 = new uint8_t[dim];
+    uint8_t *gethan4 = new uint8_t[dim];
+    uint8_t *gethan5 = new uint8_t[dim];
+    uint8_t *msbx = new uint8_t[dim]();
+    uint8_t *tmp_bool = new uint8_t[dim];
+    uint64_t *r_convert = new uint64_t[dim];
+    uint64_t *tmp2 = new uint64_t[dim]();
+    uint64_t *tmp4 = new uint64_t[dim]();
+    uint64_t *res = new uint64_t[dim]();
 
 
-    mult->hadamard_product(dim, resP2, resP3, resP5, bw_x - 2, bw_x - 2, 2 * (bw_x - 2));
-    trunc->truncate_and_reduce(dim, resP5, resP5, bw_x - 2, 2 * (bw_x - 2));
-    // trunc->truncate_direct(dim, resP5, resP5, bw_x - 2, 2 * (bw_x - 2));
-
-
-    trunc->div_pow2(dim, resP2, tmp, 1, bw_x - 2);
-
-    // aux->wrap_computation(resP3, tmp_bool, dim, bw_x - 2);
-    // aux->multiplexer_two_plain(tmp_bool, ((1 << (bw_x - 2)) / 3), tmp4, dim, bw_x - 2, bw_x - 2);
-    // for (int i = 0; i < dim; i++) {
-    //     resP3[i] /= 3;
-    //     resP3[i] -= tmp4[i];
-    //     resP3[i] &= (mask_adjust >> 1);
-    // }
-
-    aux->wrap_computation(resP3, tmp_bool, dim, bw_x - 2);
-    aux->multiplexer_two_plain(tmp_bool, ((1ULL << (bw_x - 2)) / 3), tmp4, dim, bw_x - 2, bw_x - 2);
+    trunc->truncate_and_reduce(dim, adjusted_x, tmp, bw_x - 3, bw_x - 2);
     for (int i = 0; i < dim; i++) {
-        resP3[i] = resP3[i] * ((1ULL << (bw_x - 2)) / 3);
-        resP3[i] -= tmp4[i] << (bw_x - 2);
+        gethan1[i] = tmp[i] & 1;
+        r_convert[i] = adjusted_x[i];
     }
-    trunc->truncate_and_reduce(dim, resP3, resP3, bw_x - 2, 2 * (bw_x - 2));
-    // trunc->truncate_direct(dim, resP3, resP3, bw_x - 2, 2 * (bw_x - 2));
 
-
-    trunc->div_pow2(dim, resP4, tmp2, 2, bw_x - 2);
-
-    // aux->wrap_computation(resP5, tmp_bool, dim, bw_x - 2);
-    // aux->multiplexer_two_plain(tmp_bool, ((1ULL << (bw_x - 2)) / 5), tmp4, dim, bw_x - 2, bw_x - 2);
-    // for (int i = 0; i < dim; i++) {
-    //     resP5[i] /= 5;  // divide will occur 0 to be 0.9999xx
-    //     resP5[i] -= tmp4[i];
-    //     resP5[i] &= (mask_adjust >> 1);
-    // }
-
-    aux->wrap_computation(resP5, tmp_bool, dim, bw_x - 2);
-    aux->multiplexer_two_plain(tmp_bool, ((1ULL << (bw_x - 2)) / 5), tmp4, dim, bw_x - 2, bw_x - 2);
+    // r_convert used to temp store the r*adjust_x r=3/4 for [1,2] to [1,1.5]
+    // adjust_x: bw = bw_x, scale = bw_x - 2 bw = 32, scale = 30
+    xt->z_extend(dim, r_convert, r_convert, bw_x, 2 * bw_x, msbx);
     for (int i = 0; i < dim; i++) {
-        resP5[i] = resP5[i] * ((1ULL << (bw_x - 2)) / 5);
-        resP5[i] -= tmp4[i] << (bw_x - 2);
+        r_convert[i] *= (3ULL << (bw_x - 4));
     }
-    trunc->truncate_and_reduce(dim, resP5, resP5, bw_x - 2, 2 * (bw_x - 2));
-    // trunc->truncate_direct(dim, resP5, resP5, bw_x - 2, 2 * (bw_x - 2));
+    trunc->truncate_direct(dim, r_convert, r_convert, bw_x - 2, 2 * bw_x);
+    // r_convert bw = bw_x, scale = bw_x - 2
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - adjusted_x[i];
+    }
+    aux->multiplexer(gethan1, tmp4, res, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += adjusted_x[i];
+    }
 
     // cout << endl;
-    // cout << "res: ";
+    // cout << "res [1-1.5]: ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << res[i] << ", ";
+    // }
+    // cout << endl;
+
+
+    // res: bw = bw_x - 1 scale = bw_x - 2, res, bw = 31, scale = 30, the 29-th (0.5, bw - 3) bit is zero
+    trunc->truncate_and_reduce(dim, res, tmp, bw_x - 4, bw_x - 3);
+    for (int i = 0; i < dim; i++) {
+        gethan2[i] = tmp[i] & 1;
+        r_convert[i] = res[i];
+    }
+
+    // r_convert used to temp store the r*res r=5/6 for [1,1.5] to [1,1.25]
+    xt->z_extend(dim, r_convert, r_convert, bw_x, 2 * bw_x, msbx);
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] *= ((5ULL << (bw_x - 2)) / 6);
+    }
+
+    trunc->truncate_direct(dim, r_convert, r_convert, bw_x - 2, 2 * bw_x);
+
+    // r_convert bw = bw_x - 1, scale = bw_x - 2
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan2, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
+
+    // cout << endl;
+    // cout << "res [1-1.25]: ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << res[i] << ", ";
+    // }
+    // cout << endl;
+
+
+    // res: bw = bw_x - 1 scale = bw_x - 2, res, bw = 31, scale = 30, the 29-th (0.5, bw - 3) bit is zero
+    trunc->truncate_and_reduce(dim, res, tmp, bw_x - 5, bw_x - 4);
+    for (int i = 0; i < dim; i++) {
+        gethan3[i] = tmp[i] & 1;
+        r_convert[i] = res[i];
+    }
+
+    // r_convert used to temp store the r*res r=5/6 for [1,1.5] to [1,1.25]
+    xt->z_extend(dim, r_convert, r_convert, bw_x, 2 * bw_x, msbx);
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] *= ((9ULL << (bw_x - 2)) / 10);
+    }
+
+    trunc->truncate_direct(dim, r_convert, r_convert, bw_x - 2, 2 * bw_x);
+
+    // r_convert bw = bw_x - 1, scale = bw_x - 2
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan3, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
+
+    // cout << endl;
+    // cout << "res [1-1.125]: ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << res[i] << ", ";
+    // }
+    // cout << endl;
+
+
+    // res: bw = bw_x - 1 scale = bw_x - 2, res, bw = 31, scale = 30, the 29-th (0.5, bw - 3) bit is zero
+    trunc->truncate_and_reduce(dim, res, tmp, bw_x - 6, bw_x - 5);
+    for (int i = 0; i < dim; i++) {
+        gethan4[i] = tmp[i] & 1;
+        r_convert[i] = res[i];
+    }
+
+    // r_convert used to temp store the r*res r=5/6 for [1,1.5] to [1,1.25]
+    xt->z_extend(dim, r_convert, r_convert, bw_x, 2 * bw_x, msbx);
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] *= ((17ULL << (bw_x - 2)) / 18);
+    }
+
+    trunc->truncate_direct(dim, r_convert, r_convert, bw_x - 2, 2 * bw_x);
+
+    // r_convert bw = bw_x - 1, scale = bw_x - 2
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan4, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
+
+    // cout << endl;
+    // cout << "res [1-1.0625]: ";
     // for (int i = 0; i < dim; i++) {
     //     cout << res[i] << ", ";
     // }
     // cout << endl;
     //
-    // cout << endl;
-    // cout << "tmp: ";
-    // for (int i = 0; i < dim; i++) {
-    //     cout << tmp[i] << ", ";
-    // }
-    // cout << endl;
-    //
-    // cout << endl;
-    // cout << "resP3: ";
-    // for (int i = 0; i < dim; i++) {
-    //     cout << resP3[i] << ", ";
-    // }
-    // cout << endl;
-    //
-    // cout << endl;
-    // cout << "tmp2: ";
-    // for (int i = 0; i < dim; i++) {
-    //     cout << tmp2[i] << ", ";
-    // }
-    // cout << endl;
-    // cout << endl;
-    // cout << "resP5: ";
-    // for (int i = 0; i < dim; i++) {
-    //     cout << resP5[i] << ", ";
-    // }
-    // cout << endl;
-
-
+    // res: bw = bw_x - 1 scale = bw_x - 2, res, bw = 31, scale = 30, the 29-th (0.5, bw - 3) bit is zero
+    trunc->truncate_and_reduce(dim, res, tmp, bw_x - 7, bw_x - 6);
     for (int i = 0; i < dim; i++) {
-        approx_value[i] = res[i] - tmp[i] + resP3[i] - tmp2[i] + resP5[i];
-        approx_value[i] &= (mask_adjust >> 1);
+        gethan5[i] = tmp[i] & 1;
+        r_convert[i] = res[i];
     }
 
+    // r_convert used to temp store the r*res r=5/6 for [1,1.5] to [1,1.25]
+    xt->z_extend(dim, r_convert, r_convert, bw_x, 2 * bw_x, msbx);
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] *= ((33ULL << (bw_x - 2)) / 34);
+    }
 
-    // combine the final result
-    // convert the scale back to s_x
-    trunc->truncate_and_reduce(dim, approx_value, approx_value, bw_x - 2 - 16, (bw_x - 2));
-    // trunc->truncate_direct(dim, approx_value, approx_value, bw_x - 2 - 16, (bw_x - 2));
-    xt->z_extend(dim, approx_value, approx_value, 16, bw_x);
+    trunc->truncate_direct(dim, r_convert, r_convert, bw_x - 2, 2 * bw_x);
 
+    // r_convert bw = bw_x - 1, scale = bw_x - 2
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan5, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
     // cout << endl;
-    // cout << "approx_value: ";
+    // cout << "res [1-1.03125]: ";
     // for (int i = 0; i < dim; i++) {
-    //     cout << approx_value[i] << ", ";
+    //     cout << res[i] << ", ";
     // }
     // cout << endl;
-    auto y_comm = iopack->get_comm();
-    cout << "comm: " << y_comm - x_comm << endl;
+
+    // - a + (b * (x-1))
+    // a = 0.9698751292540353
+    // b = 0.00030997309020363434
+    uint64_t B = static_cast<uint64_t>(0.9845064 * (pow(2.0, bw_x - 2)));
+    uint64_t A = static_cast<uint64_t>(0.000015139157 * (pow(2.0, bw_x - 2)));
+    if (party == ALICE) {
+        for (int i = 0; i < dim; i++) {
+            res[i] -= (1ULL << (bw_x - 2));
+        }
+    }
+
+    xt->z_extend(dim, res, res, bw_x, 2 * bw_x, msbx);
+    for (int i = 0; i < dim; i++) {
+        res[i] = B * res[i];
+    }
+    trunc->truncate_direct(dim, res, res, bw_x - 2, 2 * bw_x);
+
+    if (party == ALICE) {
+        for (int i = 0; i < dim; i++) {
+            res[i] = res[i] - A;
+        }
+    }
+
+    // cout << endl;
+    // cout << "ln(x): ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << res[i] << ", ";
+    // }
+    // cout << endl;
+
+
+    // scale back
+    uint64_t scale1 = static_cast<uint64_t>(0.28768207245178085 * (pow(2.0, bw_x - 2)));
+    uint64_t scale2 = static_cast<uint64_t>(0.1823215567939546 * (pow(2.0, bw_x - 2)));
+    uint64_t scale3 = static_cast<uint64_t>(0.10536051565782635 * (pow(2.0, bw_x - 2)));
+    uint64_t scale4 = static_cast<uint64_t>(0.05715841383994862 * (pow(2.0, bw_x - 2)));
+    uint64_t scale5 = static_cast<uint64_t>(0.02985296314968113 * (pow(2.0, bw_x - 2)));
+    // uint64_t scale6 = static_cast<uint64_t>(0.01526747213078838 * (pow(2.0, bw_x - 2)));
+
+    if (party == ALICE) {
+        for (int i = 0; i < dim; i++) {
+            r_convert[i] = res[i] + scale5;
+        }
+    } else {
+        for (int i = 0; i < dim; i++) {
+            r_convert[i] = res[i];
+        }
+    }
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan5, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
+
+    if (party == ALICE) {
+        for (int i = 0; i < dim; i++) {
+            r_convert[i] = res[i] + scale4;
+        }
+    } else {
+        for (int i = 0; i < dim; i++) {
+            r_convert[i] = res[i];
+        }
+    }
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan4, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
+
+    if (party == ALICE) {
+        for (int i = 0; i < dim; i++) {
+            r_convert[i] = res[i] + scale3;
+        }
+    } else {
+        for (int i = 0; i < dim; i++) {
+            r_convert[i] = res[i];
+        }
+    }
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan3, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
+
+    if (party == ALICE) {
+        for (int i = 0; i < dim; i++) {
+            r_convert[i] = res[i] + scale2;
+        }
+    } else {
+        for (int i = 0; i < dim; i++) {
+            r_convert[i] = res[i];
+        }
+    }
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan2, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
+
+    if (party == ALICE) {
+        for (int i = 0; i < dim; i++) {
+            r_convert[i] = res[i] + scale1;
+        }
+    } else {
+        for (int i = 0; i < dim; i++) {
+            r_convert[i] = res[i];
+        }
+    }
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan1, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
+
+    // cout << endl;
+    // cout << "ln(x): ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << res[i] << ", ";
+    // }
+    // cout << endl;
+
+    trunc->truncate_direct(dim, res, res, bw_x - 2 - s_x, bw_x);
+    xt->z_extend(dim, res, res, s_x + 2, bw_x, msbx);
 
     // the t
     int msnzb_index_bits = ceil(log2(bw_x));
@@ -1833,7 +2056,6 @@ void MathFunctions::ln_v1(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, i
         msnzb_index[i] *= (1 << s_x);
     }
     xt->z_extend(dim, msnzb_index, msnzb_index, s_x + msnzb_index_bits, bw_x);
-
 
     for (int i = 0; i < dim; i++) {
         tmp5[i] = msnzb_index[i] * (uint64_t) (log(2.0) * (1 << (s_x)));
@@ -1859,22 +2081,507 @@ void MathFunctions::ln_v1(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, i
 
 
     for (int i = 0; i < dim; i++) {
-        y[i] = tmp5[i] + tmp4[i];
+        y[i] = tmp5[i] + res[i];
         y[i] &= (1ULL << bw_x) - 1;
     }
 
     delete[] tmp;
     delete[] tmp2;
     delete[] tmp4;
-    delete[] tmp5;
+    delete[] gethan1;
+    delete[] gethan2;
+    delete[] gethan3;
+    delete[] gethan4;
+    delete[] gethan5;
+    delete[] msbx;
     delete[] res;
-    delete[] resP2;
-    delete[] resP3;
-    delete[] resP4;
-    delete[] resP5;
-    delete[] approx_value;
     delete[] r_convert;
     delete[] adjusted_x;
+    delete[] msnzb_vector_bool;
+    delete[] msnzb_vector;
+    delete[] msnzb_index;
+    delete[] exp_parity;
+    delete[] adjust;
+    delete[] tmp_bool;
+}
+
+
+void MathFunctions::sqrt_v2(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x,
+                            int32_t bw_y, int32_t s_x, int32_t s_y, bool inverse) {
+    int32_t bw_adjust = bw_x - 1;
+    uint64_t mask_adjust = (bw_adjust == 64 ? -1 : ((1ULL << bw_adjust) - 1));
+    // MSB is always 0, thus, not including it
+    uint8_t *msnzb_vector_bool = new uint8_t[dim * (bw_x - 1)];
+    uint64_t *msnzb_vector = new uint64_t[dim * (bw_x - 1)];
+    uint64_t *msnzb_index = new uint64_t[dim];
+
+    auto start = clock_start();
+    uint64_t comm = iopack->get_comm();
+    // aux->msnzb_one_hot(x, msnzb_vector_bool, bw_x - 1, dim);
+    aux->msnzb_one_hot_index(x, msnzb_vector_bool, msnzb_index, bw_x - 1, dim);
+    aux->B2A(msnzb_vector_bool, msnzb_vector, dim * (bw_x - 1), bw_x - 1);
+    uint64_t *adjust = new uint64_t[dim];
+    uint8_t *exp_parity = new uint8_t[dim];
+    for (int i = 0; i < dim; i++) {
+        adjust[i] = 0;
+        exp_parity[i] = 0;
+        for (int j = 0; j < (bw_x - 1); j++) {
+            adjust[i] += (1ULL << (bw_x - 2 - j)) * msnzb_vector[i * (bw_x - 1) + j];
+            if (((j - s_x) & 1)) {
+                exp_parity[i] ^= msnzb_vector_bool[i * (bw_x - 1) + j];
+            }
+        }
+        adjust[i] &= mask_adjust;
+    }
+    // adjusted_x: bw = bw_x - 1, scale = bw_x - 2, adjusted_x is the value in [1, 2).
+    uint64_t *adjusted_x = new uint64_t[dim];
+    mult->hadamard_product(dim, x, adjust, adjusted_x, bw_x - 1, bw_x - 1,
+                           bw_x - 1, false, false, MultMode::None);
+    xt->z_extend(dim, adjusted_x, adjusted_x, bw_x - 1, bw_x);
+
+
+    comm = iopack->get_comm() - comm;
+    long long t = time_from(start);
+
+    cout << "MSNZB Time\t" << t / (1000.0) << " ms" << endl;
+    cout << "MSNZB Bytes Sent\t" << comm << " bytes" << endl;
+
+
+    // adjusted_x is now [1, 2) reduce into a more narrow range.
+    // compare with 1/2 get the comparison result which used for the following selection for ln x
+
+    // cout << endl;
+    // cout << "adjust_x [1-2): ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << adjusted_x[i] << ", ";
+    // }
+    // cout << endl;
+
+    uint64_t *tmp = new uint64_t[dim];
+    uint8_t *gethan1 = new uint8_t[dim];
+    uint8_t *gethan2 = new uint8_t[dim];
+    uint8_t *gethan3 = new uint8_t[dim];
+    uint8_t *gethan4 = new uint8_t[dim];
+    uint8_t *gethan5 = new uint8_t[dim];
+    uint8_t *gethan6 = new uint8_t[dim];
+    uint8_t *msbx = new uint8_t[dim]();
+    uint8_t *tmp_bool = new uint8_t[dim];
+    uint64_t *r_convert = new uint64_t[dim];
+    uint64_t *tmp2 = new uint64_t[dim]();
+    uint64_t *tmp4 = new uint64_t[dim]();
+    uint64_t *res = new uint64_t[dim]();
+
+
+    trunc->truncate_and_reduce(dim, adjusted_x, tmp, bw_x - 3, bw_x - 2);
+    for (int i = 0; i < dim; i++) {
+        gethan1[i] = tmp[i] & 1;
+        r_convert[i] = adjusted_x[i];
+    }
+
+    // r_convert used to temp store the r*adjust_x r=3/4 for [1,2] to [1,1.5]
+    // adjust_x: bw = bw_x, scale = bw_x - 2 bw = 32, scale = 30
+    xt->z_extend(dim, r_convert, r_convert, bw_x, 2 * bw_x, msbx);
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] *= (3ULL << (bw_x - 4));
+    }
+    trunc->truncate_direct(dim, r_convert, r_convert, bw_x - 2, 2 * bw_x);
+    // r_convert bw = bw_x, scale = bw_x - 2
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - adjusted_x[i];
+    }
+    aux->multiplexer(gethan1, tmp4, res, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += adjusted_x[i];
+    }
+
+    // cout << endl;
+    // cout << "res [1-1.5]: ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << res[i] << ", ";
+    // }
+    // cout << endl;
+
+
+    // res: bw = bw_x - 1 scale = bw_x - 2, res, bw = 31, scale = 30, the 29-th (0.5, bw - 3) bit is zero
+    trunc->truncate_and_reduce(dim, res, tmp, bw_x - 4, bw_x - 3);
+    for (int i = 0; i < dim; i++) {
+        gethan2[i] = tmp[i] & 1;
+        r_convert[i] = res[i];
+    }
+
+    // r_convert used to temp store the r*res r=5/6 for [1,1.5] to [1,1.25]
+    xt->z_extend(dim, r_convert, r_convert, bw_x, 2 * bw_x, msbx);
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] *= ((5ULL << (bw_x - 2)) / 6);
+    }
+
+    trunc->truncate_direct(dim, r_convert, r_convert, bw_x - 2, 2 * bw_x);
+
+    // r_convert bw = bw_x - 1, scale = bw_x - 2
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan2, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
+
+    // cout << endl;
+    // cout << "res [1-1.25]: ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << res[i] << ", ";
+    // }
+    // cout << endl;
+
+
+    // res: bw = bw_x - 1 scale = bw_x - 2, res, bw = 31, scale = 30, the 29-th (0.5, bw - 3) bit is zero
+    trunc->truncate_and_reduce(dim, res, tmp, bw_x - 5, bw_x - 4);
+    for (int i = 0; i < dim; i++) {
+        gethan3[i] = tmp[i] & 1;
+        r_convert[i] = res[i];
+    }
+
+    // r_convert used to temp store the r*res r=5/6 for [1,1.5] to [1,1.25]
+    xt->z_extend(dim, r_convert, r_convert, bw_x, 2 * bw_x, msbx);
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] *= ((9ULL << (bw_x - 2)) / 10);
+    }
+
+    trunc->truncate_direct(dim, r_convert, r_convert, bw_x - 2, 2 * bw_x);
+
+    // r_convert bw = bw_x - 1, scale = bw_x - 2
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan3, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
+
+    // cout << endl;
+    // cout << "res [1-1.125]: ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << res[i] << ", ";
+    // }
+    // cout << endl;
+
+
+    // res: bw = bw_x - 1 scale = bw_x - 2, res, bw = 31, scale = 30, the 29-th (0.5, bw - 3) bit is zero
+    trunc->truncate_and_reduce(dim, res, tmp, bw_x - 6, bw_x - 5);
+    for (int i = 0; i < dim; i++) {
+        gethan4[i] = tmp[i] & 1;
+        r_convert[i] = res[i];
+    }
+
+    // r_convert used to temp store the r*res r=5/6 for [1,1.5] to [1,1.25]
+    xt->z_extend(dim, r_convert, r_convert, bw_x, 2 * bw_x, msbx);
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] *= ((17ULL << (bw_x - 2)) / 18);
+    }
+
+    trunc->truncate_direct(dim, r_convert, r_convert, bw_x - 2, 2 * bw_x);
+
+    // r_convert bw = bw_x - 1, scale = bw_x - 2
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan4, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
+
+    // cout << endl;
+    // cout << "res [1-1.0625]: ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << res[i] << ", ";
+    // }
+    // cout << endl;
+
+
+    // res: bw = bw_x - 1 scale = bw_x - 2, res, bw = 31, scale = 30, the 29-th (0.5, bw - 3) bit is zero
+    trunc->truncate_and_reduce(dim, res, tmp, bw_x - 7, bw_x - 6);
+    for (int i = 0; i < dim; i++) {
+        gethan5[i] = tmp[i] & 1;
+        r_convert[i] = res[i];
+    }
+
+    // r_convert used to temp store the r*res r=5/6 for [1,1.5] to [1,1.25]
+    xt->z_extend(dim, r_convert, r_convert, bw_x, 2 * bw_x, msbx);
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] *= ((33ULL << (bw_x - 2)) / 34);
+    }
+
+    trunc->truncate_direct(dim, r_convert, r_convert, bw_x - 2, 2 * bw_x);
+
+    // r_convert bw = bw_x - 1, scale = bw_x - 2
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan5, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
+
+    // cout << endl;
+    // cout << "res [1-1.03125]: ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << res[i] << ", ";
+    // }
+    // cout << endl;
+
+    trunc->truncate_and_reduce(dim, res, tmp, bw_x - 8, bw_x - 7);
+    for (int i = 0; i < dim; i++) {
+        gethan6[i] = tmp[i] & 1;
+        r_convert[i] = res[i];
+    }
+
+    // r_convert used to temp store the r*res r=5/6 for [1,1.5] to [1,1.25]
+    xt->z_extend(dim, r_convert, r_convert, bw_x, 2 * bw_x, msbx);
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] *= ((65ULL << (bw_x - 2)) / 66);
+    }
+
+    trunc->truncate_direct(dim, r_convert, r_convert, bw_x - 2, 2 * bw_x);
+
+    // r_convert bw = bw_x - 1, scale = bw_x - 2
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan6, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
+
+    // cout << endl;
+    // cout << "res [1-1.015625]: ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << res[i] << ", ";
+    // }
+    // cout << endl;
+
+
+    // a - (b * (x-1))
+    // a = 0.9999849764044484
+    // b = 0.4942084643407726
+    uint64_t B = static_cast<uint64_t>(0.4942084643407726 * (pow(2.0, bw_x - 2)));
+    uint64_t A = static_cast<uint64_t>(0.9999849764044484 * (pow(2.0, bw_x - 2)));
+    if (party == ALICE) {
+        for (int i = 0; i < dim; i++) {
+            res[i] -= (1ULL << (bw_x - 2));
+        }
+    }
+
+    xt->z_extend(dim, res, res, bw_x, 2 * bw_x, msbx);
+    for (int i = 0; i < dim; i++) {
+        res[i] = B * res[i];
+    }
+    trunc->truncate_direct(dim, res, res, bw_x - 2, 2 * bw_x);
+
+    if (party == ALICE) {
+        for (int i = 0; i < dim; i++) {
+            res[i] = A - res[i];
+        }
+    } else {
+        for (int i = 0; i < dim; i++) {
+            res[i] = 0 - res[i];
+        }
+    }
+
+    // cout << endl;
+    // cout << "1/sqrt(x): ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << res[i] << ", ";
+    // }
+    // cout << endl;
+
+    // scale back
+    uint64_t scale1 = static_cast<uint64_t>(0.8660254037844386 * (pow(2.0, bw_x - 2)));
+    uint64_t scale2 = static_cast<uint64_t>(0.9128709291752769 * (pow(2.0, bw_x - 2)));
+    uint64_t scale3 = static_cast<uint64_t>(0.9486832980505138 * (pow(2.0, bw_x - 2)));
+    uint64_t scale4 = static_cast<uint64_t>(0.97182531580755 * (pow(2.0, bw_x - 2)));
+    uint64_t scale5 = static_cast<uint64_t>(0.985184366143778 * (pow(2.0, bw_x - 2)));
+    uint64_t scale6 = static_cast<uint64_t>(0.9923953268977463 * (pow(2.0, bw_x - 2)));
+
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] = res[i];
+    }
+    xt->z_extend(dim, r_convert, r_convert, bw_x, 2 * bw_x, msbx);
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] *= scale6;
+    }
+    trunc->truncate_direct(dim, r_convert, r_convert, bw_x - 2, 2 * bw_x);
+
+    // r_convert bw = bw_x - 1, scale = bw_x - 2
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan6, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
+
+
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] = res[i];
+    }
+    xt->z_extend(dim, r_convert, r_convert, bw_x, 2 * bw_x, msbx);
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] *= scale5;
+    }
+    trunc->truncate_direct(dim, r_convert, r_convert, bw_x - 2, 2 * bw_x);
+
+    // r_convert bw = bw_x - 1, scale = bw_x - 2
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan5, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
+
+
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] = res[i];
+    }
+    xt->z_extend(dim, r_convert, r_convert, bw_x, 2 * bw_x, msbx);
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] *= scale4;
+    }
+    trunc->truncate_direct(dim, r_convert, r_convert, bw_x - 2, 2 * bw_x);
+    // r_convert bw = bw_x - 1, scale = bw_x - 2
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan4, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
+
+
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] = res[i];
+    }
+    xt->z_extend(dim, r_convert, r_convert, bw_x, 2 * bw_x, msbx);
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] *= scale3;
+    }
+    trunc->truncate_direct(dim, r_convert, r_convert, bw_x - 2, 2 * bw_x);
+    // r_convert bw = bw_x - 1, scale = bw_x - 2
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan3, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
+
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] = res[i];
+    }
+    xt->z_extend(dim, r_convert, r_convert, bw_x, 2 * bw_x, msbx);
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] *= scale2;
+    }
+    trunc->truncate_direct(dim, r_convert, r_convert, bw_x - 2, 2 * bw_x);
+    // r_convert bw = bw_x - 1, scale = bw_x - 2
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan2, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
+
+
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] = res[i];
+    }
+    xt->z_extend(dim, r_convert, r_convert, bw_x, 2 * bw_x, msbx);
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] *= scale1;
+    }
+    trunc->truncate_direct(dim, r_convert, r_convert, bw_x - 2, 2 * bw_x);
+    // r_convert bw = bw_x - 1, scale = bw_x - 2
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan1, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
+
+    // cout << endl;
+    // cout << "1/sqrt(x) [1, 2]: ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << res[i] << ", ";
+    // }
+    // cout << endl;
+
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] = res[i];
+        gethan1[i] = msnzb_index[i] & 1;
+    }
+
+    xt->z_extend(dim, r_convert, r_convert, bw_x, 2 * bw_x, msbx);
+    for (int i = 0; i < dim; i++) {
+        r_convert[i] *= static_cast<uint64_t>(std::sqrt(2) * (pow(2.0, bw_x - 2)));;
+    }
+    trunc->truncate_direct(dim, r_convert, r_convert, bw_x - 2, 2 * bw_x);
+    for (int i = 0; i < dim; i++) {
+        tmp4[i] = r_convert[i] - res[i];
+    }
+    aux->multiplexer(gethan1, tmp4, tmp2, dim, bw_x, bw_x);
+    for (int i = 0; i < dim; i++) {
+        res[i] += tmp2[i];
+    }
+
+    int bw_sqrt_adjust = bw_x;
+    int scale_sqrt_adjust = int(ceil(s_x / 2.0));
+    uint64_t *sqrt_adjust = new uint64_t[dim]();
+    for (int i = 0; i < dim; i++) {
+        for (int j = 0; j < (bw_x - 1); j++) {
+            sqrt_adjust[i] +=
+                    (1ULL << (int(floor((s_x - j) / 2.0)) + scale_sqrt_adjust))
+                    * msnzb_vector[i * (bw_x - 1) + j];
+        }
+    }
+
+    // cout << endl;
+    // cout << "sqrt_adjust: ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << sqrt_adjust[i] << ", ";
+    // }
+    // cout << endl;
+
+    mult->hadamard_product(dim, res, sqrt_adjust, tmp2, bw_x,
+                           bw_sqrt_adjust, bw_x + bw_sqrt_adjust, false,
+                           false, MultMode::None);
+    // x_curr: bw = s_y + floor(bw_x/2) + 1 - ceil(s_x/2), scale = s_y
+    trunc->truncate_and_reduce(dim, tmp2, y, scale_sqrt_adjust + (bw_x - 2 - s_x),
+                               bw_x + bw_sqrt_adjust);
+
+
+    // cout << endl;
+    // cout << "final res: ";
+    // for (int i = 0; i < dim; i++) {
+    //     cout << y[i] << ", ";
+    // }
+    // cout << endl;
+
+    delete[] tmp;
+    delete[] tmp2;
+    delete[] tmp4;
+    delete[] gethan1;
+    delete[] gethan2;
+    delete[] gethan3;
+    delete[] gethan4;
+    delete[] gethan5;
+    delete[] gethan6;
+    delete[] msbx;
+    delete[] res;
+    delete[] r_convert;
+    delete[] adjusted_x;
+    delete[] sqrt_adjust;
     delete[] msnzb_vector_bool;
     delete[] msnzb_vector;
     delete[] msnzb_index;

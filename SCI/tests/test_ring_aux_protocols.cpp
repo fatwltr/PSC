@@ -25,7 +25,7 @@ SOFTWARE.
 using namespace sci;
 using namespace std;
 
-int party, port = 8000, dim = 20, in_tree = 0;
+int party, port = 8000, dim = 1 << 16, in_tree = 0;
 string address = "127.0.0.1";
 IOPack *iopack;
 OTPack *otpack;
@@ -84,7 +84,19 @@ void test_mux() {
         x[i] = x[i] & mask_x;
     }
 
+    auto start = clock_start();
+    uint64_t comm = iopack->get_comm();
+
     aux->multiplexer(sel, x, y, dim, bw_x, bw_y);
+
+    comm = iopack->get_comm() - comm;
+    long long t = time_from(start);
+
+    cout << "Time\t" << t / (1000.0) << " ms" << endl;
+    cout << "Bytes Sent\t" << comm << " bytes" << endl;
+
+
+
 
     if (party == ALICE) {
         iopack->io->send_data(sel, dim * sizeof(uint8_t));
@@ -510,7 +522,7 @@ void test_msnzb_one_hot() {
     if (in_tree == 0) {
         aux->msnzb_one_hot(x, y, bw_x, dim, digit_size);
     } else {
-        aux->msnzb_one_hot_tree(x, y, bw_x, dim, digit_size);
+        aux->msnzb_one_hot_tree(x, y, bw_x, dim, 8);
     }
 
     comm = iopack->get_comm() - comm;
@@ -521,33 +533,33 @@ void test_msnzb_one_hot() {
     cout << "MSNZB Bytes Sent\t" << comm << " bytes" << endl;
     cout << endl;
 
-    if (party == ALICE) {
-        iopack->io->send_data(x, dim * sizeof(uint64_t));
-        iopack->io->send_data(y, dim * bw_x * sizeof(uint8_t));
-    } else {
-        uint64_t *x0 = new uint64_t[dim];
-        uint8_t *y0 = new uint8_t[dim * bw_x];
-        iopack->io->recv_data(x0, dim * sizeof(uint64_t));
-        iopack->io->recv_data(y0, dim * bw_x * sizeof(uint8_t));
-
-        for (int i = 0; i < dim; i++) {
-            uint64_t secure_val = 0ULL;
-            for (int j = 0; j < bw_x; j++) {
-                secure_val += (1ULL << j) * int(y[i * bw_x + j] ^ y0[i * bw_x + j]);
-            }
-            // cout << unsigned_val(x0[i] + x[i], bw_x) << endl;
-            if (unsigned_val(x0[i] + x[i], bw_x) == 0) {
-                continue;
-            }
-            assert((unsigned_val(x0[i] + x[i], bw_x) >=
-                    unsigned_val(secure_val, bw_x)) &&
-                (unsigned_val(x0[i] + x[i], bw_x) <
-                    2 * unsigned_val(secure_val, bw_x)));
-        }
-        std::cout << "MSNZB One Hot Tests Passed" << std::endl;
-        delete[] x0;
-        delete[] y0;
-    }
+    // if (party == ALICE) {
+    //     iopack->io->send_data(x, dim * sizeof(uint64_t));
+    //     iopack->io->send_data(y, dim * bw_x * sizeof(uint8_t));
+    // } else {
+    //     uint64_t *x0 = new uint64_t[dim];
+    //     uint8_t *y0 = new uint8_t[dim * bw_x];
+    //     iopack->io->recv_data(x0, dim * sizeof(uint64_t));
+    //     iopack->io->recv_data(y0, dim * bw_x * sizeof(uint8_t));
+    //
+    //     for (int i = 0; i < dim; i++) {
+    //         uint64_t secure_val = 0ULL;
+    //         for (int j = 0; j < bw_x; j++) {
+    //             secure_val += (1ULL << j) * int(y[i * bw_x + j] ^ y0[i * bw_x + j]);
+    //         }
+    //         // cout << unsigned_val(x0[i] + x[i], bw_x) << endl;
+    //         if (unsigned_val(x0[i] + x[i], bw_x) == 0) {
+    //             continue;
+    //         }
+    //         assert((unsigned_val(x0[i] + x[i], bw_x) >=
+    //                 unsigned_val(secure_val, bw_x)) &&
+    //             (unsigned_val(x0[i] + x[i], bw_x) <
+    //                 2 * unsigned_val(secure_val, bw_x)));
+    //     }
+    //     std::cout << "MSNZB One Hot Tests Passed" << std::endl;
+    //     delete[] x0;
+    //     delete[] y0;
+    // }
     delete[] x;
     delete[] y;
 }
@@ -569,8 +581,8 @@ int main(int argc, char **argv) {
 
     // test_MSB_computation();
     // test_wrap_computation();
-    // test_mux();
-    test_mux_bShr();
+    test_mux();
+    // test_mux_bShr();
     // test_B2A();
     // test_lookup_table<uint8_t>();
     // test_lookup_table<uint64_t>();

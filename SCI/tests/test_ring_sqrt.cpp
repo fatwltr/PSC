@@ -31,6 +31,7 @@ using namespace std;
 
 int party, port = 32000;
 int num_threads = 4;
+int flag = 1;
 string address = "127.0.0.1";
 
 int dim = 100000;
@@ -66,7 +67,14 @@ void sqrt_thread(int tid, uint64_t *x, uint64_t *y, int num_ops) {
     } else {
         math = new MathFunctions(party, iopackArr[tid], otpackArr[tid]);
     }
-    math->sqrt(num_ops, x, y, bw_x, bw_y, s_x, s_y, inverse);
+    cout << flag << endl;
+    if (flag == 1) {
+        cout << "sqrt: -------------" << endl;
+        math->sqrt(num_ops, x, y, bw_x, bw_y, s_x, s_y, inverse);
+    } else {
+        cout << "sqrt_v2: ------------" << endl;
+        math->sqrt_v2(num_ops, x, y, bw_x, bw_y, s_x, s_y, inverse);
+    }
 
     delete math;
 }
@@ -79,6 +87,7 @@ int main(int argc, char **argv) {
     amap.arg("p", port, "Port Number");
     amap.arg("N", dim, "Number of sqrt operations");
     amap.arg("nt", num_threads, "Number of threads");
+    amap.arg("flag", flag, "Number of threads");
     amap.arg("ip", address, "IP Address of server (ALICE)");
 
     amap.parse(argc, argv);
@@ -112,14 +121,22 @@ int main(int argc, char **argv) {
     } else {
         uint64_t *x0 = new uint64_t[dim];
         iopackArr[0]->io->recv_data(x0, dim * sizeof(uint64_t));
+        // x[0] = (x[0] - x0[0]);
+        // x[0] = 0b11000010;
+
+        double log_min = std::log2(0.0001);
+        double log_max = std::log2(10000);
+        double step = (log_max - log_min) / (dim - 1);
+
         for (int i = 0; i < dim; i++) {
-            x[i] = 0x9;
+            x[i] = (uint64_t) (std::pow(2, log_min + i * step) * (1 << s_x));
             x[i] &= (mask_x >> 1);
-            // dn is always of the form 1.xxxx
             x[i] = (x[i] - x0[i]);
         }
         delete[] x0;
     }
+
+
     for (int i = 0; i < dim; i++) {
         x[i] &= mask_x;
     }
