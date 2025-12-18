@@ -76,6 +76,9 @@ public:
     void sqrt(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, int32_t bw_y,
               int32_t s_x, int32_t s_y, bool inverse = false);
 
+    void sqrt_v1(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, int32_t bw_y,
+          int32_t s_x, int32_t s_y, bool inverse = false);
+
     // bw_y = bw_x
     void ReLU(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x,
               uint64_t six = 0);

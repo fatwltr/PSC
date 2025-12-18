@@ -676,10 +676,14 @@ void LinearOT::matrix_multiplication(int32_t dim1, int32_t dim2, int32_t dim3,
   /* print_vec(this, tmpA, bwA, dim1*dim2); */
   /* print_vec(this, tmpB, bwB, dim2*dim3); */
   uint64_t *cross_terms = new uint64_t[dim];
+
+  // auto comm = iopack->get_comm();
+
   matmul_cross_terms(dim1, dim2, dim3, tmpA, tmpB, cross_terms, bwA, bwB, bwC,
                      accumulate, mode);
   /* print_vec(this, cross_terms, bwC, dim); */
-
+  // auto end = iopack->get_comm() - comm;
+  // cout << "matmul_cross_terms: " << end << endl;
   uint64_t *local_terms = new uint64_t[dim];
   if (party == ALICE &&
       (mode == MultMode::Alice_has_A || mode == MultMode::Alice_has_B)) {

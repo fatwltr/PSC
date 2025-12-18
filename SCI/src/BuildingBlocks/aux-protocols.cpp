@@ -1185,9 +1185,6 @@ void AuxProtocols::nMinus1OUTNOT_batch_reverse(block128 *seed, uint64_t batch_si
 
 // batch aims to make n times m length to nm length
 void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint64_t length, uint64_t *offset) {
-    int n_th = (omp_get_num_procs() - 8) / 2;
-    cout << "n_th = " << n_th << endl;
-    omp_set_num_threads(n_th);
     const int tree_depth = static_cast<int>(std::ceil(std::log2(length)));
     const int leaves_size = static_cast<int>(std::pow(2, tree_depth));
     auto *batch_GGM_leaves = new block128[batch_size * leaves_size]();
@@ -1199,7 +1196,6 @@ void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint
         layer_OT_sum_seed[0] = new block128[tree_depth * batch_size];
         layer_OT_sum_seed[1] = new block128[tree_depth * batch_size];
         // build tree
-#pragma omp parallel for schedule(static)
         for (int i = 0; i < batch_size; i++) {
             batch_GGM_leaves[i * leaves_size] = my_seed[i];
         }
@@ -1214,11 +1210,8 @@ void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint
             points_this_layer *= 2;
             step_size = leaves_size / points_this_layer;
             step_size_last_layer = 2 * step_size;
-            points_last_layer = points_this_layer / 2;
-#pragma omp parallel
-            {
+            points_last_layer = points_this_layer / 2; {
                 PRG128 prg_1;
-#pragma omp for collapse(2) schedule(static)
                 for (int j = 0; j < points_last_layer; j++) {
                     // see through the nodes in each layer
                     for (int k = 0; k < batch_size; k++) {
@@ -1244,7 +1237,6 @@ void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint
             //                 }
             //             }
 
-#pragma omp parallel for schedule(static)
             for (int k = 0; k < batch_size; k++) {
                 __m128i acc0 = batch_GGM_leaves[k * leaves_size + 0];
                 __m128i acc1 = batch_GGM_leaves[k * leaves_size + step_size];
@@ -1279,7 +1271,6 @@ void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint
     } else {
         auto *r = new bool[tree_depth * batch_size];
         auto *layer_OT_sum_seed = new block128[tree_depth * batch_size];
-#pragma omp parallel for collapse(2) schedule(static)
         for (int i = 1; i <= tree_depth; i++) {
             for (int k = 0; k < batch_size; k++) {
                 r[k * tree_depth + i - 1] = (offset[k] >> (tree_depth - i) & 1) ^ 1; // extract i-th bit
@@ -1293,11 +1284,8 @@ void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint
         uint32_t step_size_last_layer = 2 * step_size;
         uint32_t points_last_layer = points_this_layer / 2;
         uint32_t skip_index = 0;
-        auto *temp_data = new block128[2];
-#pragma omp parallel
-        {
+        auto *temp_data = new block128[2]; {
             PRG128 prg_1;
-#pragma omp for schedule(static)
             for (int k = 0; k < batch_size; k++) {
                 points_this_layer = 2;
                 step_size = leaves_size / points_this_layer;
@@ -1358,7 +1346,6 @@ void AuxProtocols::nMinus1OUTNOT_batch(block128 *seed, uint64_t batch_size, uint
         delete[] r;
         delete[] layer_OT_sum_seed;
     }
-#pragma omp parallel for schedule(static)
     for (int i = 0; i < batch_size; i++) {
         memcpy(seed + i * length, batch_GGM_leaves + i * leaves_size, length * 16 * sizeof(uint8_t));
     }
@@ -1652,9 +1639,290 @@ void AuxProtocols::uniShare_naive_bool(uint8_t *uniShr, int length, const uint64
 //     delete[] x;
 // }
 
+// void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, int length, uint64_t *offset) {
+//     int n_th = (omp_get_num_procs() - 8) / 2;
+//     omp_set_num_threads(n_th);
+//     auto *seeds = new block128[length * batch_size]();
+//     // auto *prg = new PRG128[length * batch_size]();
+//     // int save_memory = length * batch_size * length > 11ULL * 1024 * 1024 * 1024 ? 11ULL * 1024 * 1024 * 1024 / (batch_size * length) : length;
+//     // save_memory = save_memory > length ? length : save_memory;
+//
+//     uint64_t mem_limit = 3ULL * 1024 * 1024 * 1024; // 3 GiB
+//     uint64_t total = static_cast<uint64_t>(length) * length;
+//
+//     uint64_t save_memory64 = total > mem_limit
+//                                  ? mem_limit / (static_cast<uint64_t>(batch_size) * length)
+//                                  : length;
+//
+//     save_memory64 = save_memory64 > length ? length : save_memory64;
+//
+//     int save_memory = static_cast<int>(save_memory64);
+//
+//     cout << "save memory: " << save_memory << endl;
+//     if (party == sci::ALICE) {
+//         // auto start = clock_start();
+//         nMinus1OUTNOT_batch(seeds, batch_size, length, nullptr);
+//         // long long comm_time = time_from(start);
+//         // cout << "shift seed time: " << comm_time / (1000.0) << " ms" << endl;
+//
+//         // std::cout << std::endl;
+//         // for (int ii = 0; ii < length; ii++) {
+//         //     print_block(seeds[ii]);
+//         // }
+//         // std::cout << std::endl;
+//
+//         // generate the shift translation shares
+//
+//         // auto **shift_translate = new uint8_t *[length];
+//         // for (int k = 0; k < 1; k++) {
+//         //     for (int i = 0; i < length; i++) {
+//         //         shift_translate[i + k * length] = new uint8_t[save_memory]();
+//         //         // prg[i + k * length].reseed(&seeds[i + k * length]);
+//         //     }
+//         // }
+//         auto *a = new uint8_t[length * batch_size]();
+//         auto *b = new uint8_t[length * batch_size]();
+//
+//         uint8_t *x_packed = new uint8_t[(length * batch_size + 7) / 8]();
+//         // start = clock_start();
+// #pragma omp parallel
+//         {
+//             PRG128 prg;
+//             int last = length % save_memory;
+//             auto **shift_translate = new uint8_t *[length];
+//             for (int k = 0; k < 1; k++) {
+//                 for (int i = 0; i < length; i++) {
+//                     shift_translate[i + k * length] = new uint8_t[save_memory]();
+//                     // prg[i + k * length].reseed(&seeds[i + k * length]);
+//                 }
+//             }
+//             // for (int k = 0; k < batch_size; k++) {
+// #pragma omp for schedule(static)
+//             for (int i = 0; i < batch_size; i++) {
+//                 // for (int kk = 0; kk < (length / save_memory); kk++) {
+//                 for (int k = 0; k < (length / save_memory); k++) {
+//                     // for (int i = 0; i < length; i++) {
+//                     for (int j = 0; j < length; j++) {
+//                         // prg.random_bool((bool *) shift_translate[i + k * length], length);
+//                         prg.reseed(&seeds[j + i * length]);
+//                         prg.random_bool((bool *) shift_translate[j], save_memory);
+//                     }
+//
+//                     // for (int i = 0; i < length; i++) {
+//                     for (int j = 0; j < length; j++) {
+//                         // for (int j = 0; j < length; j++) {
+//                         for (int l = 0; l < save_memory; l++) {
+//                             // a[j + k * length] ^= shift_translate[i + k * length][j];
+//                             a[l + k * save_memory + i * length] ^= shift_translate[j][l];
+//                             // b[i + k * length] ^= shift_translate[(i - j + length) % length + k * length][j];
+//
+//                             // b[j + i * length] ^= shift_translate[
+//                             //     (j - l - k * save_memory + length) % length][l];
+//                             b[j + i * length] ^= shift_translate[
+//                                 (j - l - k * save_memory < 0
+//                                      ? j - l - k * save_memory + length
+//                                      : j - l - k * save_memory)][l];
+//                         }
+//                     }
+//                 }
+//                 if (last == 0) {
+//                     continue;
+//                 }
+//                 int k = (length / save_memory);
+//                 for (int j = 0; j < length; j++) {
+//                     prg.reseed(&seeds[i * length + j]);
+//                     prg.random_bool((bool *) shift_translate[j], last);
+//                 }
+//                 // cout << "shift_translate" << endl;
+//                 // for (int j = 0; j < num_data * 2; j++) {
+//                 //     for (int l = 0; l < last; l++) {
+//                 //         cout << (int) shift_translate[j][l] << " ";
+//                 //     }
+//                 //     cout << endl;
+//                 // }
+//                 for (int j = 0; j < length; j++) {
+//                     for (int l = 0; l < last; l++) {
+//                         a[i * length + l + k * save_memory] ^= shift_translate[j][l];
+//                         b[j + i * length] ^= shift_translate[(j - l - k * save_memory + length) % length][
+//                             l];
+//                     }
+//                 }
+//             }
+//             for (int i = 0; i < length; i++) {
+//                 delete[] shift_translate[i];
+//             }
+//             delete[] shift_translate;
+//         }
+//
+//         // for (int i = 0; i < length; i++) {
+//         //     delete[] shift_translate[i];
+//         // }
+//         // delete[] shift_translate;
+//         auto *x = new uint8_t[length * batch_size]();
+//         // set the offset directly in the index
+// #pragma omp parallel for
+//         for (int i = 0; i < batch_size; i++) {
+//             x[offset[i] + i * length] = 1;
+//         }
+//
+//
+//         memcpy(uniShr, b, batch_size * length * sizeof(uint8_t));
+// #pragma omp parallel for
+//         for (int i = 0; i < length * batch_size; i++) {
+//             x[i] = x[i] ^ a[i];
+//         }
+//         // comm_time = time_from(start);
+//         // cout << "matrix modify time: " << comm_time / (1000.0) << " ms" << endl;
+//
+//         pack_bits(x, x_packed, length * batch_size);
+//         iopack->io->send_data(x_packed, ((length * batch_size + 7) / 8) * sizeof(uint8_t));
+//
+//         // std::cout << std::endl;
+//         // for (int i = 0; i < length; i++) {
+//         //     std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b[length + i]) << " ";
+//         // }
+//         // std::cout << std::endl;
+//
+//         delete[] x_packed;
+//         delete[] x;
+//         delete[] a;
+//         delete[] b;
+//     } else {
+//         // auto start = clock_start();
+//         nMinus1OUTNOT_batch(seeds, batch_size, length, offset);
+//         // long long comm_time = time_from(start);
+//         // cout << "shift seed time: " << comm_time / (1000.0) << " ms" << endl;
+//         // #ifndef NDEBUG
+//         // std::cout << std::endl;
+//         // for (int ii = 0; ii < length; ii++) {
+//         //     print_block(seeds[ii]);
+//         // }
+//         // std::cout << std::endl;
+//         // #endif
+//         // generate the shift translation shares
+//
+//         // auto **shift_translate = new uint8_t *[length]();
+//         // for (int k = 0; k < 1; k++) {
+//         //     for (int i = 0; i < length; i++) {
+//         //         shift_translate[i + k * length] = new uint8_t[save_memory]();
+//         //         // prg[i + k * length].reseed(&seeds[i + k * length]);
+//         //     }
+//         // }
+//         auto *c = new uint8_t[length * batch_size]();
+//         auto *c_helper = new uint8_t[length * batch_size]();
+//
+//         // start = clock_start();
+// #pragma omp parallel
+//         {
+//             PRG128 prg;
+//             int last = length % save_memory;
+//             auto **shift_translate = new uint8_t *[length]();
+//             for (int k = 0; k < 1; k++) {
+//                 for (int i = 0; i < length; i++) {
+//                     shift_translate[i + k * length] = new uint8_t[save_memory]();
+//                     // prg[i + k * length].reseed(&seeds[i + k * length]);
+//                 }
+//             }
+// #pragma omp for schedule(static)
+//             for (int i = 0; i < batch_size; i++) {
+//                 for (int k = 0; k < (length / save_memory); k++) {
+//                     for (int j = 0; j < length; j++) {
+//                         // if (j == offset[i]) {
+//                         //     continue;
+//                         // }
+//                         prg.reseed(&seeds[i * length + j]);
+//                         // prg.random_bool(reinterpret_cast<bool *>(shift_translate[j + i * length]), save_memory);
+//                         prg.random_bool(reinterpret_cast<bool *>(shift_translate[j]), save_memory);
+//                     }
+//                     for (int j = 0; j < length; j++) {
+//                         for (int l = 0; l < save_memory; l++) {
+//                             // c[j + i * length] ^= shift_translate[
+//                             //     (j - l - k * save_memory + length) % length][l];
+//                             c[j + i * length] ^= shift_translate[(j - l - k * save_memory < 0
+//                                                                       ? j - l - k * save_memory + length
+//                                                                       : j - l - k * save_memory)][l];
+//
+//                             // c_helper[(l + k * save_memory + offset[i]) % length + i * length] ^=
+//                             //         shift_translate[j][l];
+//
+//                             c_helper[(l + k * save_memory + offset[i] > length
+//                                           ? l + k * save_memory + offset[i] - length
+//                                           : l + k * save_memory + offset[i]) + i * length] ^=
+//                                     shift_translate[j][l];
+//                         }
+//                     }
+//                 }
+//                 if (last == 0) {
+//                     continue;
+//                 }
+//                 int k = (length / save_memory);
+//                 for (int j = 0; j < length; j++) {
+//                     prg.reseed(&seeds[i * length + j]);
+//                     prg.random_bool((bool *) shift_translate[j], last);
+//                 }
+//                 for (int j = 0; j < length; j++) {
+//                     for (int l = 0; l < last; l++) {
+//                         c[j + i * length] ^= shift_translate[(j - l - k * save_memory + length) % length][
+//                             l];
+//                         c_helper[(l + k * save_memory + offset[i]) % length + i * length] ^= shift_translate[
+//                             j][l];
+//                     }
+//                 }
+//             }
+//             for (int i = 0; i < length; i++) {
+//                 delete[] shift_translate[i];
+//             }
+//             delete[] shift_translate;
+//         }
+//         // for (int i = 0; i < length; i++) {
+//         //     delete[] shift_translate[i];
+//         // }
+//         // delete[] shift_translate;
+//         // comm_time = time_from(start);
+//         // cout << "build c: " << comm_time / (1000.0) << " ms" << endl;
+//         // start = clock_start();
+//         auto *xMa = new uint8_t[length * batch_size]();
+//         auto *shift_xMa = new uint8_t[length * batch_size]();
+//         auto *xMa_packed = new uint8_t[(length * batch_size + 7) / 8];
+//         iopack->io->recv_data(xMa_packed, ((length * batch_size + 7) / 8) * sizeof(uint8_t));
+//         unpack_bits(xMa_packed, xMa, length * batch_size);
+//         delete[] xMa_packed;
+//         // comm_time = time_from(start);
+//         // cout << "receive xMa time: " << comm_time / (1000.0) << " ms" << endl;
+// #pragma omp parallel for schedule(static)
+//         for (int k = 0; k < batch_size; k++) {
+//             std::memcpy(k * length + shift_xMa, k * length + xMa + length - offset[k], offset[k]);
+//             std::memcpy(k * length + shift_xMa + offset[k], k * length + xMa, length - offset[k]);
+//         }
+//         // start = clock_start();
+// #pragma omp parallel for collapse(2) schedule(static)
+//         for (int k = 0; k < batch_size; k++) {
+//             for (int i = 0; i < length; i++) {
+//                 uniShr[k * length + i] = c[k * length + i] ^ c_helper[k * length + i] ^ shift_xMa[k * length + i];
+//             }
+//         }
+//         // comm_time = time_from(start);
+//         // cout << "get the final share: " << comm_time / (1000.0) << " ms" << endl;
+//
+//         // std::cout << std::endl;
+//         // std::cout << "the shifted vector" << std::endl;
+//         // for (int i = 0; i < length; i++) {
+//         //     std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(uniShr[length + i]) << " ";
+//         // }
+//         // std::cout << std::endl;
+//
+//         delete[] c;
+//         delete[] c_helper;
+//         delete[] xMa;
+//         delete[] shift_xMa;
+//     }
+//     delete[] seeds;
+//     // delete[] x;
+//     // delete[] prg;
+// }
+
+
 void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, int length, uint64_t *offset) {
-    int n_th = (omp_get_num_procs() - 8) / 2;
-    omp_set_num_threads(n_th);
     auto *seeds = new block128[length * batch_size]();
     // auto *prg = new PRG128[length * batch_size]();
     // int save_memory = length * batch_size * length > 11ULL * 1024 * 1024 * 1024 ? 11ULL * 1024 * 1024 * 1024 / (batch_size * length) : length;
@@ -1674,7 +1942,7 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
     cout << "save memory: " << save_memory << endl;
     if (party == sci::ALICE) {
         // auto start = clock_start();
-        nMinus1OUTNOT_batch(seeds, batch_size, length, nullptr);
+        nMinus1OUTNOT_batch(seeds, batch_size, length, nullptr); // this is used to generate the OPV seeds
         // long long comm_time = time_from(start);
         // cout << "shift seed time: " << comm_time / (1000.0) << " ms" << endl;
 
@@ -1698,38 +1966,66 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
 
         uint8_t *x_packed = new uint8_t[(length * batch_size + 7) / 8]();
         // start = clock_start();
-#pragma omp parallel
         {
             PRG128 prg;
             int last = length % save_memory;
-            auto **shift_translate = new uint8_t *[length];
-            for (int k = 0; k < 1; k++) {
-                for (int i = 0; i < length; i++) {
-                    shift_translate[i + k * length] = new uint8_t[save_memory]();
-                    // prg[i + k * length].reseed(&seeds[i + k * length]);
-                }
-            }
+            auto *shift_translate = new uint8_t [save_memory];
             // for (int k = 0; k < batch_size; k++) {
-#pragma omp for schedule(static)
             for (int i = 0; i < batch_size; i++) {
                 // for (int kk = 0; kk < (length / save_memory); kk++) {
                 for (int k = 0; k < (length / save_memory); k++) {
                     // for (int i = 0; i < length; i++) {
                     for (int j = 0; j < length; j++) {
-                        // prg.random_bool((bool *) shift_translate[i + k * length], length);
                         prg.reseed(&seeds[j + i * length]);
-                        prg.random_bool((bool *) shift_translate[j], save_memory);
-                    }
+                        prg.random_data(shift_translate, save_memory);
+                        int a_start = k * save_memory + i * length;
+                        // Precompute once
+                        int base_b = j + k * save_memory;
+                        int wrap_threshold = length;
+                        int l = 0;
+                        // Mask to extract LSB
+                        const __m256i one_mask = _mm256_set1_epi8(1);
 
-                    // for (int i = 0; i < length; i++) {
-                    for (int j = 0; j < length; j++) {
-                        // for (int j = 0; j < length; j++) {
-                        for (int l = 0; l < save_memory; l++) {
-                            // a[j + k * length] ^= shift_translate[i + k * length][j];
-                            a[l + k * save_memory + i * length] ^= shift_translate[j][l];
-                            // b[i + k * length] ^= shift_translate[(i - j + length) % length + k * length][j];
-                            b[j + i * length] ^= shift_translate[
-                                (j - l - k * save_memory + length) % length][l];
+                        for (; l + 31 < save_memory; l += 32) {
+                            __m256i rnd = _mm256_loadu_si256(
+                                (const __m256i *) (shift_translate + l));
+                            rnd = _mm256_and_si256(rnd, one_mask);
+
+                            // ---- a[] update (contiguous) ----
+                            __m256i va = _mm256_loadu_si256(
+                                (const __m256i *) (a + a_start + l));
+                            va = _mm256_xor_si256(va, rnd);
+                            _mm256_storeu_si256(
+                                (__m256i *) (a + a_start + l), va);
+
+                            // ---- b[] update (wrap handled branchlessly) ----
+                            int b_pos = base_b;
+                            if (b_pos < wrap_threshold && b_pos + 32 > wrap_threshold) {
+                                for (int ii = 0; ii < 32; ii++) {
+                                    uint8_t bit = shift_translate[l + ii] & 1;
+                                    int pos = b_pos + l + ii;
+                                    if (pos >= length) pos -= length;
+                                    b[pos + i * length] ^= bit;
+                                }
+                                continue;
+                            }
+                            int idx = b_pos - (b_pos >= wrap_threshold) * wrap_threshold;
+
+                            __m256i vb = _mm256_loadu_si256(
+                                (const __m256i *) (b + idx + i * length));
+                            vb = _mm256_xor_si256(vb, rnd);
+                            _mm256_storeu_si256(
+                                (__m256i *) (b + idx + i * length), vb);
+                        }
+
+                        for (; l < save_memory; l++) {
+                            uint8_t bit = shift_translate[l] & 1;
+
+                            a[a_start + l] ^= bit;
+
+                            int pos = j + l + k * save_memory;
+                            if (pos >= length) pos -= length;
+                            b[pos + i * length] ^= bit;
                         }
                     }
                 }
@@ -1739,7 +2035,56 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
                 int k = (length / save_memory);
                 for (int j = 0; j < length; j++) {
                     prg.reseed(&seeds[i * length + j]);
-                    prg.random_bool((bool *) shift_translate[j], last);
+                    prg.random_data(shift_translate, last);
+                    int a_start = k * save_memory + i * length;
+                    // Precompute once
+                    int base_b = j + k * save_memory;
+                    int wrap_threshold = length;
+                    int l = 0;
+                    // Mask to extract LSB
+                    const __m256i one_mask = _mm256_set1_epi8(1);
+
+                    for (; l + 31 < last; l += 32) {
+                        __m256i rnd = _mm256_loadu_si256(
+                            (const __m256i *) (shift_translate + l));
+                        rnd = _mm256_and_si256(rnd, one_mask);
+
+                        // ---- a[] update (contiguous) ----
+                        __m256i va = _mm256_loadu_si256(
+                            (const __m256i *) (a + a_start + l));
+                        va = _mm256_xor_si256(va, rnd);
+                        _mm256_storeu_si256(
+                            (__m256i *) (a + a_start + l), va);
+
+                        // ---- b[] update (wrap handled branchlessly) ----
+                        int b_pos = base_b + l;
+                        if (b_pos < wrap_threshold && b_pos + 32 > wrap_threshold) {
+                            for (int ii = 0; ii < 32; ii++) {
+                                uint8_t bit = shift_translate[l + ii] & 1;
+                                int pos = b_pos + l + ii;
+                                if (pos >= length) pos -= length;
+                                b[pos + i * length] ^= bit;
+                            }
+                            continue;
+                        }
+                        int idx = b_pos - (b_pos >= wrap_threshold) * wrap_threshold;
+
+                        __m256i vb = _mm256_loadu_si256(
+                            (const __m256i *) (b + idx + i * length));
+                        vb = _mm256_xor_si256(vb, rnd);
+                        _mm256_storeu_si256(
+                            (__m256i *) (b + idx + i * length), vb);
+                    }
+
+                    for (; l < last; l++) {
+                        uint8_t bit = shift_translate[l] & 1;
+
+                        a[a_start + l] ^= bit;
+
+                        int pos = j + l + k * save_memory;
+                        if (pos >= length) pos -= length;
+                        b[pos + i * length] ^= bit;
+                    }
                 }
                 // cout << "shift_translate" << endl;
                 // for (int j = 0; j < num_data * 2; j++) {
@@ -1748,16 +2093,6 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
                 //     }
                 //     cout << endl;
                 // }
-                for (int j = 0; j < length; j++) {
-                    for (int l = 0; l < last; l++) {
-                        a[i * length + l + k * save_memory] ^= shift_translate[j][l];
-                        b[j + i * length] ^= shift_translate[(j - l - k * save_memory + length) % length][
-                            l];
-                    }
-                }
-            }
-            for (int i = 0; i < length; i++) {
-                delete[] shift_translate[i];
             }
             delete[] shift_translate;
         }
@@ -1768,14 +2103,12 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
         // delete[] shift_translate;
         auto *x = new uint8_t[length * batch_size]();
         // set the offset directly in the index
-#pragma omp parallel for
         for (int i = 0; i < batch_size; i++) {
             x[offset[i] + i * length] = 1;
         }
 
 
         memcpy(uniShr, b, batch_size * length * sizeof(uint8_t));
-#pragma omp parallel for
         for (int i = 0; i < length * batch_size; i++) {
             x[i] = x[i] ^ a[i];
         }
@@ -1820,34 +2153,74 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
         auto *c_helper = new uint8_t[length * batch_size]();
 
         // start = clock_start();
-#pragma omp parallel
+
         {
             PRG128 prg;
             int last = length % save_memory;
-            auto **shift_translate = new uint8_t *[length]();
-            for (int k = 0; k < 1; k++) {
-                for (int i = 0; i < length; i++) {
-                    shift_translate[i + k * length] = new uint8_t[save_memory]();
-                    // prg[i + k * length].reseed(&seeds[i + k * length]);
-                }
-            }
-#pragma omp for schedule(static)
+            auto *shift_translate = new uint8_t [save_memory]();
             for (int i = 0; i < batch_size; i++) {
                 for (int k = 0; k < (length / save_memory); k++) {
                     for (int j = 0; j < length; j++) {
-                        // if (j == offset[i]) {
-                        //     continue;
-                        // }
                         prg.reseed(&seeds[i * length + j]);
-                        // prg.random_bool(reinterpret_cast<bool *>(shift_translate[j + i * length]), save_memory);
-                        prg.random_bool(reinterpret_cast<bool *>(shift_translate[j]), save_memory);
-                    }
-                    for (int j = 0; j < length; j++) {
-                        for (int l = 0; l < save_memory; l++) {
-                            c[j + i * length] ^= shift_translate[
-                                (j - l - k * save_memory + length) % length][l];
-                            c_helper[(l + k * save_memory + offset[i]) % length + i * length] ^=
-                                    shift_translate[j][l];
+                        prg.random_data(shift_translate, save_memory);
+                        int c_start = i * length;
+                        int wrap_threshold = length;
+                        int l = 0;
+                        // Mask to extract LSB
+                        const __m256i one_mask = _mm256_set1_epi8(1);
+
+                        for (; l + 31 < save_memory; l += 32) {
+                            __m256i rnd = _mm256_loadu_si256(
+                                (const __m256i *) (shift_translate + l));
+                            rnd = _mm256_and_si256(rnd, one_mask);
+
+                            // ---- b[] update (wrap handled branchlessly) ----
+                            int c_pos = j + k * save_memory;
+                            if (c_pos < wrap_threshold && c_pos + 32 > wrap_threshold) {
+                                for (int ii = 0; ii < 32; ii++) {
+                                    uint8_t bit = shift_translate[l + ii] & 1;
+                                    int pos = c_pos + l + ii;
+                                    if (pos >= length) pos -= length;
+                                    c[pos + c_start] ^= bit;
+                                }
+                                continue;
+                            }
+                            int idx = c_pos - (c_pos >= wrap_threshold) * wrap_threshold;
+
+                            __m256i vb = _mm256_loadu_si256(
+                                (const __m256i *) (c + idx + i * length));
+                            vb = _mm256_xor_si256(vb, rnd);
+                            _mm256_storeu_si256(
+                                (__m256i *) (c + idx + i * length), vb);
+
+                            c_pos = k * save_memory + offset[i];
+                            if (c_pos < wrap_threshold && c_pos + 32 > wrap_threshold) {
+                                for (int ii = 0; ii < 32; ii++) {
+                                    uint8_t bit = shift_translate[l + ii] & 1;
+                                    int pos = c_pos + l + ii;
+                                    if (pos >= length) pos -= length;
+                                    c[pos + c_start] ^= bit;
+                                }
+                                continue;
+                            }
+                            idx = c_pos - (c_pos >= wrap_threshold) * wrap_threshold;
+
+                            vb = _mm256_loadu_si256(
+                                (const __m256i *) (c + idx + i * length));
+                            vb = _mm256_xor_si256(vb, rnd);
+                            _mm256_storeu_si256(
+                                (__m256i *) (c + idx + i * length), vb);
+                        }
+
+                        for (; l < save_memory; l++) {
+                            uint8_t bit = shift_translate[l] & 1;
+
+                            int pos = j + l + k * save_memory;
+                            if (pos >= length) pos -= length;
+                            c[pos + i * length] ^= bit;
+                            pos = offset[i] + l + k * save_memory;
+                            if (pos >= length) pos -= length;
+                            c[pos + i * length] ^= bit;
                         }
                     }
                 }
@@ -1857,22 +2230,71 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
                 int k = (length / save_memory);
                 for (int j = 0; j < length; j++) {
                     prg.reseed(&seeds[i * length + j]);
-                    prg.random_bool((bool *) shift_translate[j], last);
-                }
-                for (int j = 0; j < length; j++) {
-                    for (int l = 0; l < last; l++) {
-                        c[j + i * length] ^= shift_translate[(j - l - k * save_memory + length) % length][
-                            l];
-                        c_helper[(l + k * save_memory + offset[i]) % length + i * length] ^= shift_translate[
-                            j][l];
+                    prg.random_data(shift_translate, last);
+                    int c_start = i * length;
+                    int wrap_threshold = length;
+                    int l = 0;
+                    // Mask to extract LSB
+                    const __m256i one_mask = _mm256_set1_epi8(1);
+
+                    for (; l + 31 < save_memory; l += 32) {
+                        __m256i rnd = _mm256_loadu_si256(
+                            (const __m256i *) (shift_translate + l));
+                        rnd = _mm256_and_si256(rnd, one_mask);
+
+                        // ---- b[] update (wrap handled branchlessly) ----
+                        int c_pos = j + k * save_memory;
+                        if (c_pos < wrap_threshold && c_pos + 32 > wrap_threshold) {
+                            for (int ii = 0; ii < 32; ii++) {
+                                uint8_t bit = shift_translate[l + ii] & 1;
+                                int pos = c_pos + l + ii;
+                                if (pos >= length) pos -= length;
+                                c[pos + c_start] ^= bit;
+                            }
+                            continue;
+                        }
+                        int idx = c_pos - (c_pos >= wrap_threshold) * wrap_threshold;
+
+                        __m256i vb = _mm256_loadu_si256(
+                            (const __m256i *) (c + idx + i * length));
+                        vb = _mm256_xor_si256(vb, rnd);
+                        _mm256_storeu_si256(
+                            (__m256i *) (c + idx + i * length), vb);
+
+                        c_pos = k * save_memory + offset[i];
+                        if (c_pos < wrap_threshold && c_pos + 32 > wrap_threshold) {
+                            for (int ii = 0; ii < 32; ii++) {
+                                uint8_t bit = shift_translate[l + ii] & 1;
+                                int pos = c_pos + l + ii;
+                                if (pos >= length) pos -= length;
+                                c[pos + c_start] ^= bit;
+                            }
+                            continue;
+                        }
+                        idx = c_pos - (c_pos >= wrap_threshold) * wrap_threshold;
+
+                        vb = _mm256_loadu_si256(
+                            (const __m256i *) (c + idx + i * length));
+                        vb = _mm256_xor_si256(vb, rnd);
+                        _mm256_storeu_si256(
+                            (__m256i *) (c + idx + i * length), vb);
+                    }
+
+                    for (; l < save_memory; l++) {
+                        uint8_t bit = shift_translate[l] & 1;
+
+                        int pos = j + l + k * save_memory;
+                        if (pos >= length) pos -= length;
+                        c[pos + i * length] ^= bit;
+                        pos = offset[i] + l + k * save_memory;
+                        if (pos >= length) pos -= length;
+                        c[pos + i * length] ^= bit;
                     }
                 }
             }
-            for (int i = 0; i < length; i++) {
-                delete[] shift_translate[i];
-            }
             delete[] shift_translate;
         }
+
         // for (int i = 0; i < length; i++) {
         //     delete[] shift_translate[i];
         // }
@@ -1888,16 +2310,14 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
         delete[] xMa_packed;
         // comm_time = time_from(start);
         // cout << "receive xMa time: " << comm_time / (1000.0) << " ms" << endl;
-#pragma omp parallel for schedule(static)
         for (int k = 0; k < batch_size; k++) {
             std::memcpy(k * length + shift_xMa, k * length + xMa + length - offset[k], offset[k]);
             std::memcpy(k * length + shift_xMa + offset[k], k * length + xMa, length - offset[k]);
         }
         // start = clock_start();
-#pragma omp parallel for collapse(2) schedule(static)
         for (int k = 0; k < batch_size; k++) {
             for (int i = 0; i < length; i++) {
-                uniShr[k * length + i] = c[k * length + i] ^ c_helper[k * length + i] ^ shift_xMa[k * length + i];
+                uniShr[k * length + i] = c[k * length + i] ^ shift_xMa[k * length + i];
             }
         }
         // comm_time = time_from(start);
@@ -1919,7 +2339,6 @@ void AuxProtocols::uniShare_naive_bool_batch(uint8_t *uniShr, int batch_size, in
     // delete[] x;
     // delete[] prg;
 }
-
 
 void AuxProtocols::multiplexer_two_plain(uint8_t *sel, uint64_t *x, uint64_t *y,
                                          int32_t size, int32_t bw_x, int32_t bw_y) {

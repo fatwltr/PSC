@@ -35,14 +35,14 @@ int flag = 1;
 string address = "127.0.0.1";
 
 int dim = 100000;
-// int bw_x = 16;
-// int bw_y = 16;
-// int s_x = 12;
-// int s_y = 12;
-int bw_x = 32;
-int bw_y = 32;
-int s_x = 16;
-int s_y = 16;
+int bw_x = 16;
+int bw_y = 16;
+int s_x = 12;
+int s_y = 12;
+// int bw_x = 32;
+// int bw_y = 32;
+// int s_x = 16;
+// int s_y = 16;
 bool inverse = true;
 
 uint64_t mask_x = (bw_x == 64 ? -1 : ((1ULL << bw_x) - 1));
@@ -71,9 +71,11 @@ void sqrt_thread(int tid, uint64_t *x, uint64_t *y, int num_ops) {
     if (flag == 1) {
         cout << "sqrt: -------------" << endl;
         math->sqrt(num_ops, x, y, bw_x, bw_y, s_x, s_y, inverse);
+        // math->sqrt_v1(num_ops, x, y, bw_x, bw_y, s_x, s_y, inverse);
     } else {
         cout << "sqrt_v2: ------------" << endl;
-        math->sqrt_v2(num_ops, x, y, bw_x, bw_y, s_x, s_y, inverse);
+        math->sqrt_v1(num_ops, x, y, bw_x, bw_y, s_x, s_y, inverse);
+        // math->sqrt_v2(num_ops, x, y, bw_x, bw_y, s_x, s_y, inverse);
     }
 
     delete math;
@@ -124,8 +126,8 @@ int main(int argc, char **argv) {
         // x[0] = (x[0] - x0[0]);
         // x[0] = 0b11000010;
 
-        double log_min = std::log2(0.0001);
-        double log_max = std::log2(10000);
+        double log_min = std::log2(0.1);
+        double log_max = std::log2(8);
         double step = (log_max - log_min) / (dim - 1);
 
         for (int i = 0; i < dim; i++) {
