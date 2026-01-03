@@ -14,7 +14,7 @@ LinearOT *prod;
 int dim = 1 << 16;
 int bwA = 32;
 int bwB = 32;
-int bwC = 64;
+int bwC = 64; // the decimal need first to multiplication and then truncate such that need two scale length
 
 uint64_t maskA = (bwA == 64 ? -1 : ((1ULL << bwA) - 1));
 uint64_t maskB = (bwB == 64 ? -1 : ((1ULL << bwB) - 1));

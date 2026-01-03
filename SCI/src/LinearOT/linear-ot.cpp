@@ -172,6 +172,22 @@ void LinearOT::hadamard_product(int32_t dim, uint64_t *inA, uint64_t *inB,
                                 int32_t bwC, bool signed_arithmetic,
                                 bool signed_B, MultMode mode, uint8_t *msbA,
                                 uint8_t *msbB) {
+
+  if (party == sci::ALICE) {
+    iopack->io->send_data(inA, ceil(bwA * dim / 8.0));
+    iopack->io->send_data(inB, ceil(bwB * dim / 8.0));
+    iopack->io->recv_data(inA, ceil(bwA * dim / 8.0));
+    iopack->io->recv_data(inB, ceil(bwB * dim / 8.0));
+  }else {
+    iopack->io->recv_data(inA, ceil(bwA * dim / 8.0));
+    iopack->io->recv_data(inB, ceil(bwB * dim / 8.0));
+    iopack->io->send_data(inA, ceil(bwA * dim / 8.0));
+    iopack->io->send_data(inB, ceil(bwB * dim / 8.0));
+  }
+
+
+  return;
+
   matrix_multiplication(1, dim, 1, inA, inB, outC, bwA, bwB, bwC,
                         signed_arithmetic, signed_B, false, mode, msbA, msbB);
 }

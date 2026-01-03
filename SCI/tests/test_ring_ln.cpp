@@ -34,7 +34,7 @@ int num_threads = 4;
 int flag = 0;
 string address = "127.0.0.1";
 
-int dim = 100;
+int dim = 10000;
 // int bw_x = 16;
 // int bw_y = 16;
 // int s_x = 12;
@@ -70,7 +70,7 @@ void ln_thread(int tid, uint64_t *x, uint64_t *y, int num_ops) {
     if (flag == 1) {
         math->ln_v1(num_ops, x, y, bw_x, bw_y, s_x, s_y);
     } else {
-        math->ln_v2(num_ops, x, y, bw_x, bw_y, s_x, s_y);
+        math->ln_v1(num_ops, x, y, bw_x, bw_y, s_x, s_y);
     }
     delete math;
 }
@@ -167,41 +167,41 @@ int main(int argc, char **argv) {
         total_comm += thread_comm[i];
     }
 
-    /************** Verification ****************/
-    /********************************************/
-    if (party == ALICE) {
-        iopackArr[0]->io->send_data(x, dim * sizeof(uint64_t));
-        iopackArr[0]->io->send_data(y, dim * sizeof(uint64_t));
-    } else {
-        // party == BOB
-        uint64_t *x0 = new uint64_t[dim];
-        uint64_t *y0 = new uint64_t[dim];
-        iopackArr[0]->io->recv_data(x0, dim * sizeof(uint64_t));
-        iopackArr[0]->io->recv_data(y0, dim * sizeof(uint64_t));
-
-        uint64_t total_err = 0;
-        uint64_t max_ULP_err = 0;
-        for (int i = 0; i < dim; i++) {
-            double dbl_x = (signed_val(x0[i] + x[i], bw_x)) / double(1LL << s_x);
-            double dbl_y = (signed_val(y0[i] + y[i], bw_y)) / double(1LL << s_y);
-            double ln_x;
-            ln_x = log(dbl_x);
-            uint64_t err = computeULPErr(dbl_y, ln_x, s_y);
-            if (err > 0 or err == 0) {
-                cout << "ULP Error: " << dbl_x << "," << dbl_y << "," << ln_x << ","
-                        << err << endl;
-            }
-            total_err += err;
-            max_ULP_err = std::max(max_ULP_err, err);
-        }
-
-        cerr << "Average ULP error: " << total_err / dim << endl;
-        cerr << "Max ULP error: " << max_ULP_err << endl;
-        cerr << "Number of tests: " << dim << endl;
-
-        delete[] x0;
-        delete[] y0;
-    }
+    // /************** Verification ****************/
+    // /********************************************/
+    // if (party == ALICE) {
+    //     iopackArr[0]->io->send_data(x, dim * sizeof(uint64_t));
+    //     iopackArr[0]->io->send_data(y, dim * sizeof(uint64_t));
+    // } else {
+    //     // party == BOB
+    //     uint64_t *x0 = new uint64_t[dim];
+    //     uint64_t *y0 = new uint64_t[dim];
+    //     iopackArr[0]->io->recv_data(x0, dim * sizeof(uint64_t));
+    //     iopackArr[0]->io->recv_data(y0, dim * sizeof(uint64_t));
+    //
+    //     uint64_t total_err = 0;
+    //     uint64_t max_ULP_err = 0;
+    //     for (int i = 0; i < dim; i++) {
+    //         double dbl_x = (signed_val(x0[i] + x[i], bw_x)) / double(1LL << s_x);
+    //         double dbl_y = (signed_val(y0[i] + y[i], bw_y)) / double(1LL << s_y);
+    //         double ln_x;
+    //         ln_x = log(dbl_x);
+    //         uint64_t err = computeULPErr(dbl_y, ln_x, s_y);
+    //         if (err > 0 or err == 0) {
+    //             cout << "ULP Error: " << dbl_x << "," << dbl_y << "," << ln_x << ","
+    //                     << err << endl;
+    //         }
+    //         total_err += err;
+    //         max_ULP_err = std::max(max_ULP_err, err);
+    //     }
+    //
+    //     cerr << "Average ULP error: " << total_err / dim << endl;
+    //     cerr << "Max ULP error: " << max_ULP_err << endl;
+    //     cerr << "Number of tests: " << dim << endl;
+    //
+    //     delete[] x0;
+    //     delete[] y0;
+    // }
 
     cout << "Number of ln/s:\t" << (double(dim) / t) * 1e6 << std::endl;
     cout << "ln Time\t" << t / (1000.0) << " ms" << endl;

@@ -641,9 +641,6 @@ void MathFunctions::sqrt(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x,
     // }
     // cout << endl;
 
-    start = clock_start();
-    comm = iopack->get_comm();
-
     aux->B2A(msnzb_vector_bool, msnzb_vector, dim * (bw_x - 1), bw_x - 1);
     uint64_t *adjust = new uint64_t[dim];
     uint8_t *exp_parity = new uint8_t[dim];
@@ -667,12 +664,6 @@ void MathFunctions::sqrt(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x,
     uint64_t *adjusted_x_m = new uint64_t[dim];
     trunc->truncate_and_reduce(dim, adjusted_x, adjusted_x_m, bw_x - m - 2,
                                bw_x - 2);
-
-    comm = iopack->get_comm() - comm;
-    t = time_from(start);
-
-    cout << "adjust x Time\t" << t / (1000.0) << " ms" << endl;
-    cout << "adjust x Bytes Sent\t" << comm << " bytes" << endl;
 
     // m + 1 bits will be input to the lookup table
     int32_t M = (1LL << (m + 1));
@@ -753,8 +744,6 @@ void MathFunctions::sqrt(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x,
     uint64_t *Y_curr = new uint64_t[dim];
     uint64_t *Y_sq = new uint64_t[dim];
 
-    start = clock_start();
-    comm = iopack->get_comm();
 
     for (int i = 0; i < iters; i++) {
         if (i == 0) {
@@ -815,13 +804,6 @@ void MathFunctions::sqrt(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x,
         memcpy(b_prev, b_curr, dim * sizeof(uint64_t));
         memcpy(Y_prev, Y_curr, dim * sizeof(uint64_t));
     }
-
-
-    comm = iopack->get_comm() - comm;
-    t = time_from(start);
-
-    cout << "newton Time\t" << t / (1000.0) << " ms" << endl;
-    cout << "newton Bytes Sent\t" << comm << " bytes" << endl;
 
     int32_t bw_sqrt_adjust = bw_x / 2;
     uint64_t mask_sqrt_adjust =
@@ -1825,6 +1807,13 @@ void MathFunctions::ln_v1(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, i
     uint64_t comm = iopack->get_comm();
 
     aux->msnzb_one_hot_index(x, msnzb_vector_bool, msnzb_index, bw_x - 1, dim);
+
+    comm = iopack->get_comm() - comm;
+    long long t = time_from(start);
+
+    cout << "MSNZB Time\t" << t / (1000.0) << " ms" << endl;
+    cout << "MSNZB Bytes Sent\t" << comm << " bytes" << endl;
+
     aux->B2A(msnzb_vector_bool, msnzb_vector, dim * (bw_x - 1), bw_x - 1);
     uint64_t *adjust = new uint64_t[dim];
     uint8_t *exp_parity = new uint8_t[dim];
@@ -1839,6 +1828,8 @@ void MathFunctions::ln_v1(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, i
         }
         adjust[i] &= mask_adjust;
     }
+
+
     // adjusted_x: bw = bw_x - 1, scale = bw_x - 2, adjusted_x is the value in [1, 2).
     uint64_t *adjusted_x = new uint64_t[dim];
     mult->hadamard_product(dim, x, adjust, adjusted_x, bw_x - 1, bw_x - 1,
@@ -1864,96 +1855,6 @@ void MathFunctions::ln_v1(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, i
     uint64_t *res = new uint64_t[dim]();
 
 
-    trunc->truncate_and_reduce(dim, adjusted_x, tmp, bw_x - 2 - 1, bw_x - 2);
-    // reduce the sign bit and the integer part 1
-    if (party == ALICE) {
-        for (int i = 0; i < dim; i++) {
-            tmp[i] = 2 - tmp[i];
-        }
-    }
-    equality->check_equality(lethan2, tmp, dim, 1);
-
-    // set the corresponding r, which is in [0, 1/2] that evaluated by the Taylor series
-    for (int i = 0; i < dim; i++) {
-        r_convert[i] = adjusted_x[i];
-        r_convert[i] &= mask_adjust;
-    }
-
-
-    aux->wrap_computation(r_convert, tmp_bool, dim, bw_x - 1);
-    aux->multiplexer_two_plain(tmp_bool, (1ULL << (bw_x - 1)) / 4, tmp4, dim, bw_x - 1, bw_x - 1);
-
-
-    for (int i = 0; i < dim; i++) {
-        r_convert[i] /= 4;
-        r_convert[i] -= tmp4[i];
-        r_convert[i] = adjusted_x[i] - r_convert[i];
-        r_convert[i] &= mask_adjust;
-    }
-
-    for (int i = 0; i < dim; i++) {
-        tmp4[i] = adjusted_x[i] - r_convert[i];
-        tmp4[i] &= mask_adjust;
-    }
-    aux->multiplexer(lethan2, tmp4, res, dim, bw_x - 1, bw_x - 1);
-    for (int i = 0; i < dim; i++) {
-        res[i] += r_convert[i];
-        res[i] &= mask_adjust;
-    }
-
-    // cout << endl;
-    // cout << "res [1-1.5]: ";
-    // for (int i = 0; i < dim; i++) {
-    //     cout << res[i] << ", ";
-    // }
-    // cout << endl;
-
-    // the res store x in [1-1.5], now reduce it into [1-1.25]
-    trunc->truncate_and_reduce(dim, res, tmp, bw_x - 2 - 2, bw_x - 3); //the sign bit x - 1 < 0.5
-    if (party == ALICE) {
-        for (int i = 0; i < dim; i++) {
-            tmp[i] = 2 - tmp[i];
-        }
-    }
-    equality->check_equality(lethan4, tmp, dim, 1);
-
-    // set the corresponding r, which is in [0, 1/4] that evaluated by the Taylor series
-    // sometimes the divide result is wrong
-
-    for (int i = 0; i < dim; i++) {
-        r_convert[i] = res[i];
-        r_convert[i] &= mask_adjust;
-    }
-
-
-    aux->wrap_computation(r_convert, tmp_bool, dim, bw_x - 1);
-    aux->multiplexer_two_plain(tmp_bool, 0x15555555ULL, tmp4, dim, bw_x - 1, bw_x - 1);
-
-
-    for (int i = 0; i < dim; i++) {
-        r_convert[i] /= 6;
-        r_convert[i] -= tmp4[i];
-        r_convert[i] = res[i] - r_convert[i];
-        r_convert[i] &= mask_adjust;
-    }
-
-
-    for (int i = 0; i < dim; i++) {
-        tmp4[i] = res[i] - r_convert[i];
-        tmp4[i] &= mask_adjust;
-    }
-    aux->multiplexer(lethan4, tmp4, res, dim, bw_x - 1, bw_x - 1);
-    for (int i = 0; i < dim; i++) {
-        res[i] += r_convert[i];
-        res[i] &= (mask_adjust >> 1); // mask_adjust is 31 bits, set the result be [0, 0.25] for Taylor series
-    }
-
-
-    comm = iopack->get_comm() - comm;
-    long long t = time_from(start);
-
-    cout << "MSNZB Time\t" << t / (1000.0) << " ms" << endl;
-    cout << "MSNZB Bytes Sent\t" << comm << " bytes" << endl;
 
 
     // cout << endl;
@@ -1971,61 +1872,23 @@ void MathFunctions::ln_v1(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, i
     // uint64_t *temp_constant = new uint64_t[dim]();
     uint64_t *approx_value = new uint64_t[dim]();
     mult->hadamard_product(dim, res, res, tmp, bw_x - 2, bw_x - 2, 2 * (bw_x - 2));
-    trunc->truncate_and_reduce(dim, tmp, resP2, bw_x - 2, 2 * (bw_x - 2));
-    // trunc->truncate_direct(dim, tmp, resP2, bw_x - 2, 2 * (bw_x - 2));
+    // trunc->truncate_and_reduce(dim, tmp, resP2, bw_x - 2, 2 * (bw_x - 2));
+    trunc->truncate_direct(dim, tmp, resP2, bw_x - 2, 2 * (bw_x - 2));
 
-    mult->hadamard_product(dim, res, resP2, resP3, bw_x - 2, bw_x - 2, 2 * (bw_x - 2));
-    trunc->truncate_and_reduce(dim, resP3, resP3, bw_x - 2, 2 * (bw_x - 2));
-    // trunc->truncate_direct(dim, resP3, resP3, bw_x - 2, 2 * (bw_x - 2));
-
-    mult->hadamard_product(dim, resP2, resP2, resP4, bw_x - 2, bw_x - 2, 2 * (bw_x - 2));
-    trunc->truncate_and_reduce(dim, resP4, resP4, bw_x - 2, 2 * (bw_x - 2));
-    // trunc->truncate_direct(dim, resP4, resP4, bw_x - 2, 2 * (bw_x - 2));
-
-
-    mult->hadamard_product(dim, resP2, resP3, resP5, bw_x - 2, bw_x - 2, 2 * (bw_x - 2));
-    trunc->truncate_and_reduce(dim, resP5, resP5, bw_x - 2, 2 * (bw_x - 2));
+    // mult->hadamard_product(dim, res, resP2, resP3, bw_x - 2, bw_x - 2, 2 * (bw_x - 2));
+    // trunc->truncate_and_reduce(dim, resP3, resP3, bw_x - 2, 2 * (bw_x - 2));
+    // // trunc->truncate_direct(dim, resP3, resP3, bw_x - 2, 2 * (bw_x - 2));
+    //
+    // mult->hadamard_product(dim, resP2, resP2, resP4, bw_x - 2, bw_x - 2, 2 * (bw_x - 2));
+    // trunc->truncate_and_reduce(dim, resP4, resP4, bw_x - 2, 2 * (bw_x - 2));
+    // // trunc->truncate_direct(dim, resP4, resP4, bw_x - 2, 2 * (bw_x - 2));
+    //
+    //
+    // mult->hadamard_product(dim, resP2, resP3, resP5, bw_x - 2, bw_x - 2, 2 * (bw_x - 2));
+    // trunc->truncate_and_reduce(dim, resP5, resP5, bw_x - 2, 2 * (bw_x - 2));
     // trunc->truncate_direct(dim, resP5, resP5, bw_x - 2, 2 * (bw_x - 2));
 
 
-    trunc->div_pow2(dim, resP2, tmp, 1, bw_x - 2);
-
-    // aux->wrap_computation(resP3, tmp_bool, dim, bw_x - 2);
-    // aux->multiplexer_two_plain(tmp_bool, ((1 << (bw_x - 2)) / 3), tmp4, dim, bw_x - 2, bw_x - 2);
-    // for (int i = 0; i < dim; i++) {
-    //     resP3[i] /= 3;
-    //     resP3[i] -= tmp4[i];
-    //     resP3[i] &= (mask_adjust >> 1);
-    // }
-
-    aux->wrap_computation(resP3, tmp_bool, dim, bw_x - 2);
-    aux->multiplexer_two_plain(tmp_bool, ((1ULL << (bw_x - 2)) / 3), tmp4, dim, bw_x - 2, bw_x - 2);
-    for (int i = 0; i < dim; i++) {
-        resP3[i] = resP3[i] * ((1ULL << (bw_x - 2)) / 3);
-        resP3[i] -= tmp4[i] << (bw_x - 2);
-    }
-    trunc->truncate_and_reduce(dim, resP3, resP3, bw_x - 2, 2 * (bw_x - 2));
-    // trunc->truncate_direct(dim, resP3, resP3, bw_x - 2, 2 * (bw_x - 2));
-
-
-    trunc->div_pow2(dim, resP4, tmp2, 2, bw_x - 2);
-
-    // aux->wrap_computation(resP5, tmp_bool, dim, bw_x - 2);
-    // aux->multiplexer_two_plain(tmp_bool, ((1ULL << (bw_x - 2)) / 5), tmp4, dim, bw_x - 2, bw_x - 2);
-    // for (int i = 0; i < dim; i++) {
-    //     resP5[i] /= 5;  // divide will occur 0 to be 0.9999xx
-    //     resP5[i] -= tmp4[i];
-    //     resP5[i] &= (mask_adjust >> 1);
-    // }
-
-    aux->wrap_computation(resP5, tmp_bool, dim, bw_x - 2);
-    aux->multiplexer_two_plain(tmp_bool, ((1ULL << (bw_x - 2)) / 5), tmp4, dim, bw_x - 2, bw_x - 2);
-    for (int i = 0; i < dim; i++) {
-        resP5[i] = resP5[i] * ((1ULL << (bw_x - 2)) / 5);
-        resP5[i] -= tmp4[i] << (bw_x - 2);
-    }
-    trunc->truncate_and_reduce(dim, resP5, resP5, bw_x - 2, 2 * (bw_x - 2));
-    // trunc->truncate_direct(dim, resP5, resP5, bw_x - 2, 2 * (bw_x - 2));
 
     // cout << endl;
     // cout << "res: ";
@@ -2081,51 +1944,6 @@ void MathFunctions::ln_v1(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, i
     // }
     // cout << endl;
 
-    // lethan4
-    uint64_t *convert_res = new uint64_t[dim]();
-    if (party == ALICE) {
-        for (int i = 0; i < dim; i++) {
-            convert_res[i] = approx_value[i] + (uint64_t) (log(6.0 / 5) * (1 << (s_x)));
-            convert_res[i] &= ((1ULL << bw_x) - 1);
-        }
-    } else {
-        for (int i = 0; i < dim; i++) {
-            convert_res[i] = approx_value[i];
-            convert_res[i] &= ((1ULL << bw_x) - 1);
-        }
-    }
-
-    for (int i = 0; i < dim; i++) {
-        tmp[i] = approx_value[i] - convert_res[i];
-    }
-    aux->multiplexer(lethan4, tmp, tmp2, dim, bw_x, bw_x);
-    for (int i = 0; i < dim; i++) {
-        tmp2[i] += convert_res[i];
-    }
-
-    // lethan2
-    if (party == ALICE) {
-        for (int i = 0; i < dim; i++) {
-            convert_res[i] = tmp2[i] + (uint64_t) (log(4.0 / 3) * (1 << (s_x)));
-            convert_res[i] &= ((1ULL << bw_x) - 1);
-        }
-    } else {
-        for (int i = 0; i < dim; i++) {
-            convert_res[i] = tmp2[i];
-            convert_res[i] &= ((1ULL << bw_x) - 1);
-        }
-    }
-
-    for (int i = 0; i < dim; i++) {
-        tmp[i] = tmp2[i] - convert_res[i];
-    }
-    aux->multiplexer(lethan2, tmp, tmp4, dim, bw_x, bw_x);
-    for (int i = 0; i < dim; i++) {
-        tmp4[i] += convert_res[i];
-    }
-    // tmp4 store the ln part
-
-
     // the t
     int msnzb_index_bits = ceil(log2(bw_x));
     uint64_t *tmp5 = new uint64_t[dim]();
@@ -2175,7 +1993,6 @@ void MathFunctions::ln_v1(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, i
     delete[] resP4;
     delete[] resP5;
     delete[] approx_value;
-    delete[] convert_res;
     delete[] r_convert;
     delete[] adjusted_x;
     delete[] msnzb_vector_bool;

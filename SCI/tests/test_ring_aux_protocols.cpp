@@ -25,7 +25,7 @@ SOFTWARE.
 using namespace sci;
 using namespace std;
 
-int party, port = 8000, dim = 1 << 16, in_tree = 0;
+int party, port = 8000, dim = 100000, in_tree = 0;
 string address = "127.0.0.1";
 IOPack *iopack;
 OTPack *otpack;
@@ -581,7 +581,7 @@ int main(int argc, char **argv) {
 
     // test_MSB_computation();
     // test_wrap_computation();
-    test_mux();
+    // test_mux();
     // test_mux_bShr();
     // test_B2A();
     // test_lookup_table<uint8_t>();
@@ -589,7 +589,7 @@ int main(int argc, char **argv) {
     // test_MSB_to_Wrap();
     // test_AND();
     // test_digit_decomposition();
-    // test_msnzb_one_hot();
+    test_msnzb_one_hot();
 
     return 0;
 }
