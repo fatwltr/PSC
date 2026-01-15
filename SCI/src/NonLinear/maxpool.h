@@ -125,63 +125,197 @@ public:
         }
     }
 
-    // when using this function we need the value in inpArr provide one more bit than its actual value range
+
     void funcMaxMPC_spcial(int size, type *inpArr, type *maxi, type *maxiIdx, uint64_t bw_Idx) {
-        type max_temp;
-        // std::cout << "inner bw_Idx: " << bw_Idx << std::endl;
+        if (this->algeb_str != RING)
+            throw std::runtime_error("Unsupported algebraic structure");
+
+        std::vector<type> vals(inpArr, inpArr + size);
+        std::vector<type> idxs(size);
+        for (int i = 0; i < size; i++) idxs[i] = i;
+
         type mask_idx = (bw_Idx == 64 ? -1 : ((1ULL << bw_Idx) - 1));
-        type maxIdx_temp;
-        type compare_with;
-        uint8_t res;
-        if (this->algeb_str == RING) {
-            max_temp = inpArr[0];
-            maxIdx_temp = 0;
-            for (int c = 1; c < size; c++) {
+
+        while (vals.size() > 1) {
+            int pairs = vals.size() / 2;
+
+            std::vector<type> Za(pairs);
+            std::vector<type> compare_with(pairs);
+            std::vector<uint8_t> res(pairs);
+
+            // Step 1: prepare batch inputs
+            for (int i = 0; i < pairs; i++) {
+                type a = vals[2 * i];
+                type b = vals[2 * i + 1];
+                Za[i] = (a - b) & mask_l;
+
                 if (party == sci::ALICE) {
-                    type Za = (max_temp - inpArr[c]) & mask_l;
-                    compare_with = Za & ((1 << (l - 1)) - 1);
-                    // std::cout << "wa: " << compare_with << std::endl;
-                    aux->mill->compare(&res, &compare_with, 1, l);
-                    // std::cout << "res: " << static_cast<uint32_t>(res) << std::endl;
-                    uint8_t ba = Za < (1 << (l - 1));
-                    // std::cout << "ba: " << static_cast<uint32_t>(ba) << std::endl;
-                    res ^= ba;
-                    // std::cout << static_cast<uint32_t>(res) << " ";
-                    max_temp = (max_temp - inpArr[c]) & mask_l;
-                    maxIdx_temp = (maxIdx_temp - c) & mask_idx;
-                    aux->multiplexer(&res, &max_temp, &max_temp, 1, l, l);
-                    aux->multiplexer(&res, &maxIdx_temp, &maxIdx_temp, 1, bw_Idx, bw_Idx);
-                    max_temp += inpArr[c];
-                    maxIdx_temp += c;
-                    max_temp &= mask_l;
-                    maxIdx_temp &= mask_idx;
-                    // std::cout << maxIdx_temp << std::endl;
+                    compare_with[i] = Za[i] & ((1 << (l - 1)) - 1);
                 } else {
-                    type Zb = (max_temp - inpArr[c]) & mask_l;
-                    compare_with = (1 << (l - 1)) - (Zb & ((1 << (l - 1)) - 1));
-                    // std::cout << "t/2 - wb: " << compare_with << std::endl;
-                    aux->mill->compare(&res, &compare_with, 1, l);
-                    // std::cout << "res: " << static_cast<uint32_t>(res) << std::endl;
-                    max_temp = (max_temp - inpArr[c]) & mask_l;
-                    uint8_t bb = Zb < (1 << (l - 1));
-                    // std::cout << "bb: " << static_cast<uint32_t>(bb) << std::endl;
-                    res ^= bb;
-                    res ^= 1;
-                    // std::cout << static_cast<uint32_t>(res) << " ";
-                    aux->multiplexer(&res, &max_temp, &max_temp, 1, l, l);
-                    aux->multiplexer(&res, &maxIdx_temp, &maxIdx_temp, 1, bw_Idx, bw_Idx);
-                    max_temp += inpArr[c];
-                    max_temp &= mask_l;
-                    maxIdx_temp &= mask_idx;
-                    // std::cout << maxIdx_temp << std::endl;
+                    compare_with[i] = (1 << (l - 1)) - (Za[i] & ((1 << (l - 1)) - 1));
                 }
             }
-            maxi[0] = max_temp;
-            maxiIdx[0] = maxIdx_temp;
-        } else {
-            throw std::runtime_error("funcMaxMPC_spcial: Unsupported algebraic structure.");
+
+            // Step 2: one batched MPC compare
+            aux->mill->compare(res.data(), compare_with.data(), pairs, l);
+
+            // Step 3: fix res bits
+            for (int i = 0; i < pairs; i++) {
+                uint8_t b = Za[i] < (1 << (l - 1));
+                res[i] ^= b;
+                if (party == sci::BOB) res[i] ^= 1;
+            }
+
+            // Step 4: apply batched multiplexers
+            for (int i = 0; i < pairs; i++) {
+                int a = 2 * i;
+                int b = 2 * i + 1;
+
+                type dv = (vals[a] - vals[b]) & mask_l;
+                type di = (idxs[a] - idxs[b]) & mask_idx;
+
+                aux->multiplexer(&res[i], &dv, &dv, 1, l, l);
+                aux->multiplexer(&res[i], &di, &di, 1, bw_Idx, bw_Idx);
+
+                vals[i] = (dv + vals[b]) & mask_l;
+                idxs[i] = (di + idxs[b]) & mask_idx;
+            }
+
+            // Step 5: if odd, keep last
+            if (vals.size() % 2 == 1) {
+                vals[pairs] = vals.back();
+                idxs[pairs] = idxs.back();
+                vals.resize(pairs + 1);
+                idxs.resize(pairs + 1);
+            } else {
+                vals.resize(pairs);
+                idxs.resize(pairs);
+            }
         }
+
+        maxi[0] = vals[0];
+        maxiIdx[0] = idxs[0];
     }
+
+    void funcMaxMPC_spcialbase(int size, type *inpArr, type *maxi, uint64_t bw_Idx) {
+        if (this->algeb_str != RING)
+            throw std::runtime_error("Unsupported algebraic structure");
+
+        std::vector<type> vals(inpArr, inpArr + size);
+
+        while (vals.size() > 1) {
+            int pairs = vals.size() / 2;
+
+            std::vector<type> Za(pairs);
+            std::vector<type> compare_with(pairs);
+            std::vector<uint8_t> res(pairs);
+
+            // Step 1: prepare batch inputs
+            for (int i = 0; i < pairs; i++) {
+                type a = vals[2 * i];
+                type b = vals[2 * i + 1];
+                Za[i] = (a - b) & mask_l;
+
+                if (party == sci::ALICE) {
+                    compare_with[i] = Za[i] & ((1 << (l - 1)) - 1);
+                } else {
+                    compare_with[i] = (1 << (l - 1)) - (Za[i] & ((1 << (l - 1)) - 1));
+                }
+            }
+
+            // Step 2: one batched MPC compare
+            aux->mill->compare(res.data(), compare_with.data(), pairs, l);
+
+            // Step 3: fix res bits
+            for (int i = 0; i < pairs; i++) {
+                uint8_t b = Za[i] < (1 << (l - 1));
+                res[i] ^= b;
+                if (party == sci::BOB) res[i] ^= 1;
+            }
+
+            // Step 4: apply batched multiplexers
+            for (int i = 0; i < pairs; i++) {
+                int a = 2 * i;
+                int b = 2 * i + 1;
+
+                type dv = (vals[a] - vals[b]) & mask_l;
+
+                aux->multiplexer(&res[i], &dv, &dv, 1, l, l);
+
+                vals[i] = (dv + vals[b]) & mask_l;
+            }
+
+            // Step 5: if odd, keep last
+            if (vals.size() % 2 == 1) {
+                vals[pairs] = vals.back();
+                vals.resize(pairs + 1);
+            } else {
+                vals.resize(pairs);
+            }
+        }
+
+        maxi[0] = vals[0];
+    }
+
+
+
+    // when using this function we need the value in inpArr provide one more bit than its actual value range
+    // void funcMaxMPC_spcial(int size, type *inpArr, type *maxi, type *maxiIdx, uint64_t bw_Idx) {
+    //     type max_temp;
+    //     // std::cout << "inner bw_Idx: " << bw_Idx << std::endl;
+    //     type mask_idx = (bw_Idx == 64 ? -1 : ((1ULL << bw_Idx) - 1));
+    //     type maxIdx_temp;
+    //     type compare_with;
+    //     uint8_t res;
+    //     if (this->algeb_str == RING) {
+    //         max_temp = inpArr[0];
+    //         maxIdx_temp = 0;
+    //         for (int c = 1; c < size; c++) {
+    //             if (party == sci::ALICE) {
+    //                 type Za = (max_temp - inpArr[c]) & mask_l;
+    //                 compare_with = Za & ((1 << (l - 1)) - 1);
+    //                 // std::cout << "wa: " << compare_with << std::endl;
+    //                 aux->mill->compare(&res, &compare_with, 1, l);
+    //                 // std::cout << "res: " << static_cast<uint32_t>(res) << std::endl;
+    //                 uint8_t ba = Za < (1 << (l - 1));
+    //                 // std::cout << "ba: " << static_cast<uint32_t>(ba) << std::endl;
+    //                 res ^= ba;
+    //                 // std::cout << static_cast<uint32_t>(res) << " ";
+    //                 max_temp = (max_temp - inpArr[c]) & mask_l;
+    //                 maxIdx_temp = (maxIdx_temp - c) & mask_idx;
+    //                 aux->multiplexer(&res, &max_temp, &max_temp, 1, l, l);
+    //                 aux->multiplexer(&res, &maxIdx_temp, &maxIdx_temp, 1, bw_Idx, bw_Idx);
+    //                 max_temp += inpArr[c];
+    //                 maxIdx_temp += c;
+    //                 max_temp &= mask_l;
+    //                 maxIdx_temp &= mask_idx;
+    //                 // std::cout << maxIdx_temp << std::endl;
+    //             } else {
+    //                 type Zb = (max_temp - inpArr[c]) & mask_l;
+    //                 compare_with = (1 << (l - 1)) - (Zb & ((1 << (l - 1)) - 1));
+    //                 // std::cout << "t/2 - wb: " << compare_with << std::endl;
+    //                 aux->mill->compare(&res, &compare_with, 1, l);
+    //                 // std::cout << "res: " << static_cast<uint32_t>(res) << std::endl;
+    //                 max_temp = (max_temp - inpArr[c]) & mask_l;
+    //                 uint8_t bb = Zb < (1 << (l - 1));
+    //                 // std::cout << "bb: " << static_cast<uint32_t>(bb) << std::endl;
+    //                 res ^= bb;
+    //                 res ^= 1;
+    //                 // std::cout << static_cast<uint32_t>(res) << " ";
+    //                 aux->multiplexer(&res, &max_temp, &max_temp, 1, l, l);
+    //                 aux->multiplexer(&res, &maxIdx_temp, &maxIdx_temp, 1, bw_Idx, bw_Idx);
+    //                 max_temp += inpArr[c];
+    //                 max_temp &= mask_l;
+    //                 maxIdx_temp &= mask_idx;
+    //                 // std::cout << maxIdx_temp << std::endl;
+    //             }
+    //         }
+    //         maxi[0] = max_temp;
+    //         maxiIdx[0] = maxIdx_temp;
+    //     } else {
+    //         throw std::runtime_error("funcMaxMPC_spcial: Unsupported algebraic structure.");
+    //     }
+    // }
 
     void funcMaxMPCIdeal(int rows, int cols, type *inpArr, type *maxi,
                          type *maxiIdx, bool computeMaxIdx = false) {
@@ -243,3 +377,52 @@ public:
 };
 
 #endif // MAXPOOL_PRIMARY_H__
+
+
+// void funcMaxMPC_spcialbase(int size, type *inpArr, type *maxi, uint64_t bw_Idx) {
+//     type max_temp;
+//     // std::cout << "inner bw_Idx: " << bw_Idx << std::endl;
+//     type mask_idx = (bw_Idx == 64 ? -1 : ((1ULL << bw_Idx) - 1));
+//     type compare_with;
+//     uint8_t res;
+//     if (this->algeb_str == RING) {
+//         max_temp = inpArr[0];
+//         for (int c = 1; c < size; c++) {
+//             if (party == sci::ALICE) {
+//                 type Za = (max_temp - inpArr[c]) & mask_l;
+//                 compare_with = Za & ((1 << (l - 1)) - 1);
+//                 // std::cout << "wa: " << compare_with << std::endl;
+//                 aux->mill->compare(&res, &compare_with, 1, l);
+//                 // std::cout << "res: " << static_cast<uint32_t>(res) << std::endl;
+//                 uint8_t ba = Za < (1 << (l - 1));
+//                 // std::cout << "ba: " << static_cast<uint32_t>(ba) << std::endl;
+//                 res ^= ba;
+//                 // std::cout << static_cast<uint32_t>(res) << " ";
+//                 max_temp = (max_temp - inpArr[c]) & mask_l;
+//                 aux->multiplexer(&res, &max_temp, &max_temp, 1, l, l);
+//                 max_temp += inpArr[c];
+//                 max_temp &= mask_l;
+//                 // std::cout << maxIdx_temp << std::endl;
+//             } else {
+//                 type Zb = (max_temp - inpArr[c]) & mask_l;
+//                 compare_with = (1 << (l - 1)) - (Zb & ((1 << (l - 1)) - 1));
+//                 // std::cout << "t/2 - wb: " << compare_with << std::endl;
+//                 aux->mill->compare(&res, &compare_with, 1, l);
+//                 // std::cout << "res: " << static_cast<uint32_t>(res) << std::endl;
+//                 max_temp = (max_temp - inpArr[c]) & mask_l;
+//                 uint8_t bb = Zb < (1 << (l - 1));
+//                 // std::cout << "bb: " << static_cast<uint32_t>(bb) << std::endl;
+//                 res ^= bb;
+//                 res ^= 1;
+//                 // std::cout << static_cast<uint32_t>(res) << " ";
+//                 aux->multiplexer(&res, &max_temp, &max_temp, 1, l, l);
+//                 max_temp += inpArr[c];
+//                 max_temp &= mask_l;
+//                 // std::cout << maxIdx_temp << std::endl;
+//             }
+//         }
+//         maxi[0] = max_temp;
+//     } else {
+//         throw std::runtime_error("funcMaxMPC_spcial: Unsupported algebraic structure.");
+//     }
+// }

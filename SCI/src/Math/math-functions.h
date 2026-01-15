@@ -62,6 +62,17 @@ public:
              int32_t s_nm, int32_t s_dn, int32_t s_out, bool signed_nm = true,
              bool compute_msnzb = false);
 
+    void div_1(int32_t dim,
+         // denominator
+         uint64_t *dn,
+         // output
+         uint64_t *out,
+         // bitwidths
+         int32_t bw_dn, int32_t bw_out,
+         // scales
+         int32_t s_dn, int32_t s_out, bool signed_nm = true,
+         bool compute_msnzb = false);
+
     // Assumes x is always negative
     void lookup_table_exp(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x,
                           int32_t bw_y, int32_t s_x, int32_t s_y);

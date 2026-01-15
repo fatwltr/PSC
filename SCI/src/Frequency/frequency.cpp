@@ -4255,3 +4255,72 @@ void Frequency::count_kth_linear(uint64_t *res, uint64_t *frequency, int k, int 
     delete[] res_eq;
     delete [] endpoints;
 }
+
+
+void Frequency::max(uint64_t *res, uint64_t *frequency, int num_stand, int num_data,
+                                 int32_t bw_data, int32_t bw_res) {
+    uint64_t *endpoints = new uint64_t[num_stand]();
+    endpoints[0] = frequency[0];
+    for (int i = 1; i < num_stand; i++) {
+        endpoints[i] = endpoints[i - 1] + frequency[i];
+        endpoints[i] &= (1ULL << bw_res) - 1;
+    }
+    // cout << "endpoints: " << endl;
+    // for (int i = 0; i < num_stand; i++) {
+    //     cout << endpoints[i] << ", ";
+    // }
+    // cout << endl;
+
+    auto *temp_t64 = new uint64_t[num_stand - 1]();
+    auto *temp_t264 = new uint64_t[num_stand - 1]();
+    auto *temp = new uint64_t[num_stand]();
+    auto *res_t = new uint8_t[num_stand - 1]();
+    auto *res_t1 = new uint8_t[num_stand - 1]();
+    auto *res_eq = new uint8_t[num_stand - 1]();
+    auto *res_tAND = new uint8_t[num_stand]();
+
+
+    for (int i = 0; i < num_stand - 1; i++) {
+        if (party == ALICE) {
+            temp_t64[i] = (endpoints[i] - num_data) & ((1ULL << (bw_res)) - 1);
+        } else {
+            temp_t64[i] = endpoints[i] & ((1ULL << (bw_res)) - 1);
+        }
+    }
+    // the secret share input for comparison is not correct when <a> = <b>
+    equality->check_equality(res_eq, temp_t64, num_stand, bw_res);
+
+    for (int i = 0; i < num_stand - 1; i++) {
+        if (party == ALICE) {
+            res_eq[i] ^= 1;
+        }
+    }
+
+    // res_t k <= x_0
+    if (party == ALICE) {
+        for (int i = 0; i < num_stand - 1; i++) {
+            res_t1[i] = res_eq[i] ^ 1;
+        }
+    } else {
+        for (int i = 0; i < num_stand - 1; i++) {
+            res_t1[i] = res_eq[i];
+        }
+    }
+
+    aux->B2A(res_t1, temp, num_stand, bw_data);
+
+    for (int i = 0; i < num_stand; i++) {
+        res[0] += (temp[i] * (i + 1));
+    }
+
+    res[0] = party == ALICE ? res[0] - 1 : res[0];
+
+    delete[] temp_t64;
+    delete[] temp;
+    delete[] temp_t264;
+    delete[] res_t;
+    delete[] res_t1;
+    delete[] res_tAND;
+    delete[] res_eq;
+    delete [] endpoints;
+}

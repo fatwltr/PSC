@@ -30,11 +30,11 @@ using namespace std;
 #define MAX_THREADS 4
 
 int party, port = 32000;
-int num_threads = 4;
+int num_threads = 1;
 int flag = 1;
 string address = "127.0.0.1";
 
-int dim = 10000;
+int dim = 100000;
 // int bw_x = 16;
 // int bw_y = 16;
 // int s_x = 12;

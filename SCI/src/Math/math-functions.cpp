@@ -327,6 +327,96 @@ void MathFunctions::div(int32_t dim, uint64_t *nm, uint64_t *dn, uint64_t *out,
     }
 }
 
+
+
+void MathFunctions::div_1(int32_t dim, uint64_t *dn, uint64_t *out,
+                        int32_t bw_dn, int32_t bw_out,
+                        int32_t s_dn, int32_t s_out,
+                        bool signed_nm, bool compute_msnzb) {
+    assert(s_out <= s_dn);
+
+    // out_precision = iters * (2*m + 2)
+    int32_t m, iters;
+    m = (s_out <= 18
+             ? ceil((s_out - 2) / 2.0)
+             : ceil((ceil(s_out / 2.0) - 2) / 2.0));
+    iters = (s_out <= 18 ? 0 : 1);
+
+    int32_t s_tmp_dn;
+    int32_t bw_adjust;
+    int32_t s_adjust;
+    uint64_t *tmp_dn;
+    uint64_t *adjust;
+    if (compute_msnzb) {
+        s_tmp_dn = bw_dn - 1;
+        bw_adjust = bw_dn + 1;
+        s_adjust = bw_dn - 1 - s_dn;
+        uint64_t mask_adjust = (bw_adjust == 64 ? -1 : ((1ULL << bw_adjust) - 1));
+        // MSB is always 0, thus, not including it
+        uint8_t *msnzb_vector_bool = new uint8_t[dim * bw_dn];
+        uint64_t *msnzb_vector = new uint64_t[dim * bw_dn];
+        aux->msnzb_one_hot(dn, msnzb_vector_bool, bw_dn, dim);
+        aux->B2A(msnzb_vector_bool, msnzb_vector, dim * bw_dn, bw_adjust);
+        // adjust: bw = bw_dn, scale = bw_dn - 1 - s_dn
+        adjust = new uint64_t[dim];
+        for (int i = 0; i < dim; i++) {
+            adjust[i] = 0;
+            for (int j = 0; j < bw_dn; j++) {
+                adjust[i] += (1ULL << (bw_dn - 1 - j)) * msnzb_vector[i * bw_dn + j];
+            }
+            adjust[i] &= mask_adjust;
+        }
+        // tmp_dn: bw = bw_dn, scale = bw_dn - 1
+        tmp_dn = new uint64_t[dim];
+        mult->hadamard_product(dim, dn, adjust, tmp_dn, bw_dn, bw_dn + 1, bw_dn + 1,
+                               false, false, MultMode::None);
+
+        delete[] msnzb_vector_bool;
+        delete[] msnzb_vector;
+    } else {
+        // tmp_dn: bw = s_dn + 1, scale = s_dn
+        s_tmp_dn = s_dn;
+        tmp_dn = dn;
+    }
+
+    uint64_t *tmp_1 = new uint64_t[dim];
+    uint64_t *tmp_2 = new uint64_t[dim];
+    // tmp_1: bw = s_tmp_dn + m + 4, scale = s_tmp_dn + m + 3
+    reciprocal_approximation(dim, m, tmp_dn, tmp_1, bw_dn, s_tmp_dn + m + 4,
+                             s_tmp_dn, s_tmp_dn + m + 4);
+
+    uint64_t *w0 = new uint64_t[dim];
+    // w0: bw = s_out + 1, scale = s_out
+    trunc->truncate_and_reduce(dim, tmp_1, w0, s_tmp_dn + m + 3 - s_out,
+                               s_tmp_dn + m + 4);
+
+    // a0: bw = bw_out, scale = s_out
+    uint64_t *a0 = new uint64_t[dim];
+    if (compute_msnzb) {
+        int32_t bw_tmp1 =
+                (bw_out + s_adjust < bw_adjust ? bw_adjust : bw_out + s_adjust);
+        // tmp_1: bw = bw_tmp1, scale = s_out + s_adjust
+        mult->hadamard_product(dim, a0, adjust, tmp_1, bw_out, bw_adjust, bw_tmp1,
+                               signed_nm, false, MultMode::None);
+        // a0: bw = bw_out, scale = s_out
+        trunc->truncate_and_reduce(dim, tmp_1, a0, s_adjust, bw_out + s_adjust);
+    }
+
+    // tmp_1: bw = s_tmp_dn + 2, scale = s_tmp_dn
+    uint64_t s_plus_2_mask = (1ULL << (s_tmp_dn + 2)) - 1;
+    for (int i = 0; i < dim; i++) {
+        tmp_1[i] = tmp_dn[i] & s_plus_2_mask;
+    }
+
+    delete[] tmp_1;
+    delete[] tmp_2;
+    delete[] w0;
+    if (compute_msnzb) {
+        delete[] tmp_dn;
+        delete[] adjust;
+    }
+}
+
 uint64_t lookup_neg_exp(uint64_t val_in, int32_t s_in, int32_t s_out) {
     if (s_in < 0) {
         s_in *= -1;
@@ -629,8 +719,8 @@ void MathFunctions::sqrt(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x,
     comm = iopack->get_comm() - comm;
     long long t = time_from(start);
 
-    cout << "MSNZB Time\t" << t / (1000.0) << " ms" << endl;
-    cout << "MSNZB Bytes Sent\t" << comm << " bytes" << endl;
+    // cout << "MSNZB Time\t" << t / (1000.0) << " ms" << endl;
+    // cout << "MSNZB Bytes Sent\t" << comm << " bytes" << endl;
 
 
     // uint64_t *msnzb_index = new uint64_t[dim];
@@ -1811,8 +1901,8 @@ void MathFunctions::ln_v1(int32_t dim, uint64_t *x, uint64_t *y, int32_t bw_x, i
     comm = iopack->get_comm() - comm;
     long long t = time_from(start);
 
-    cout << "MSNZB Time\t" << t / (1000.0) << " ms" << endl;
-    cout << "MSNZB Bytes Sent\t" << comm << " bytes" << endl;
+    // cout << "MSNZB Time\t" << t / (1000.0) << " ms" << endl;
+    // cout << "MSNZB Bytes Sent\t" << comm << " bytes" << endl;
 
     aux->B2A(msnzb_vector_bool, msnzb_vector, dim * (bw_x - 1), bw_x - 1);
     uint64_t *adjust = new uint64_t[dim];

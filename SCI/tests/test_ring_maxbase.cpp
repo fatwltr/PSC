@@ -22,7 +22,6 @@ int num_stand = 4;
 int main(int argc, char **argv) {
     ArgMapping amap;
     amap.arg("r", party, "Role of party: ALICE = 1; BOB = 2");
-    amap.arg("eq", eq, "eq=1 use count_eq");
     amap.arg("p", port, "Port Number");
     amap.arg("nd", num_data, "Number of elements");
     amap.arg("ns", num_stand, "Number of stands");
@@ -31,7 +30,6 @@ int main(int argc, char **argv) {
 
     IOPack *iopack = new IOPack(party, port, address);
     sci::OTPack *otpack = new sci::OTPack(iopack, party);
-    Frequency *frequency = new Frequency(party, iopack, otpack);
     uint64_t *data = new uint64_t[num_data];
     uint64_t *stand = new uint64_t[num_stand];
     for (int i = 0; i < num_stand; ++i) {
@@ -40,6 +38,9 @@ int main(int argc, char **argv) {
     uint64_t *res = new uint64_t[num_stand]();
     int bw_data = ceil(log2(num_stand + 1));
     int bw_res = ceil(log2(num_data + 1));
+
+    auto *maxpool_oracle = new MaxPoolProtocol<uint64_t>(
+            party, RING, iopack, bw_res + 1, 4, 0, otpack);
 
     PRG128 prg;
     prg.random_data(data, num_data * sizeof(uint64_t));
@@ -50,14 +51,14 @@ int main(int argc, char **argv) {
     auto start = clock_start();
     uint64_t comm = iopack->get_comm();
 
-    frequency->count_shift_batch(res, data, num_data, stand, num_stand, bw_data, bw_res);
-
+    uint64_t tt;
+    maxpool_oracle->funcMaxMPC_spcialbase(num_data, data, &tt, bw_data);
 
     comm = iopack->get_comm() - comm;
     long long t = time_from(start);
 
-    cout << "frequency Time\t" << t / (1000.0) << " ms" << endl;
-    cout << "frequency Bytes Sent\t" << comm << " bytes" << endl;
+    cout << "Time\t" << t / (1000.0) << " ms" << endl;
+    cout << "Bytes Sent\t" << comm << " bytes" << endl;
 
 
     // if (party == ALICE) {
@@ -80,6 +81,7 @@ int main(int argc, char **argv) {
     //     //     t_res[i] += res[i];
     //     //     t_res[i] &= (1ULL << bw_res) - 1;
     //     // }
+    //     cout << "original data" << endl;
     //     for (int i = 0; i < num_data; ++i) {
     //         t_data[i] += data[i];
     //         t_data[i] %= num_stand;
@@ -97,25 +99,10 @@ int main(int argc, char **argv) {
     //     delete [] t_res;
     // }
 
-    uint64_t* sorted_array = new uint64_t[num_data]();
-    auto sort_start = clock_start();
-    uint64_t comm_second = iopack->get_comm();
-
-    // frequency->count_sort(sorted_array, res, num_stand, num_data, bw_data, bw_res);
-    frequency->count_sort_v2(sorted_array, res, num_stand, num_data, bw_data, bw_res);
-
-    comm_second = iopack->get_comm() - comm_second;
-    long long sort_time = time_from(sort_start);
-
-    cout << endl;
-    cout << "Ex-sort Time\t" << sort_time / (1000.0) << " ms" << endl;
-    cout << "Ex-sort Bytes Sent\t" << comm_second << " bytes" << endl;
-
     delete[] data;
     delete[] res;
     delete[] stand;
     delete otpack;
     delete iopack;
-    delete frequency;
     return 0;
 }

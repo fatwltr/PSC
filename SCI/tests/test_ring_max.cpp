@@ -22,7 +22,6 @@ int num_stand = 4;
 int main(int argc, char **argv) {
     ArgMapping amap;
     amap.arg("r", party, "Role of party: ALICE = 1; BOB = 2");
-    amap.arg("eq", eq, "eq=1 use count_eq");
     amap.arg("p", port, "Port Number");
     amap.arg("nd", num_data, "Number of elements");
     amap.arg("ns", num_stand, "Number of stands");
@@ -49,7 +48,7 @@ int main(int argc, char **argv) {
 
     auto start = clock_start();
     uint64_t comm = iopack->get_comm();
-
+    // frequency->count_shift(res, data, num_data, stand, num_stand, bw_data, bw_res);
     frequency->count_shift_batch(res, data, num_data, stand, num_stand, bw_data, bw_res);
 
 
@@ -80,6 +79,7 @@ int main(int argc, char **argv) {
     //     //     t_res[i] += res[i];
     //     //     t_res[i] &= (1ULL << bw_res) - 1;
     //     // }
+    //     cout << "original data" << endl;
     //     for (int i = 0; i < num_data; ++i) {
     //         t_data[i] += data[i];
     //         t_data[i] %= num_stand;
@@ -97,19 +97,20 @@ int main(int argc, char **argv) {
     //     delete [] t_res;
     // }
 
-    uint64_t* sorted_array = new uint64_t[num_data]();
+    uint64_t kth_value = 0;
     auto sort_start = clock_start();
     uint64_t comm_second = iopack->get_comm();
 
-    // frequency->count_sort(sorted_array, res, num_stand, num_data, bw_data, bw_res);
-    frequency->count_sort_v2(sorted_array, res, num_stand, num_data, bw_data, bw_res);
+    // we fix the k = n/4 here.
+    // frequency->count_kth(&kth_value, res,num_data / 4, num_stand, num_data, bw_data, bw_res);
+    frequency->max(&kth_value, res, num_stand, num_data, bw_data, bw_res);
 
     comm_second = iopack->get_comm() - comm_second;
     long long sort_time = time_from(sort_start);
 
     cout << endl;
-    cout << "Ex-sort Time\t" << sort_time / (1000.0) << " ms" << endl;
-    cout << "Ex-sort Bytes Sent\t" << comm_second << " bytes" << endl;
+    cout << "Ex-max Time\t" << sort_time / (1000.0) << " ms" << endl;
+    cout << "Ex-max Bytes Sent\t" << comm_second << " bytes" << endl;
 
     delete[] data;
     delete[] res;

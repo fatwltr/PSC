@@ -67,11 +67,9 @@ void ln_thread(int tid, uint64_t *x, uint64_t *y, int num_ops) {
     } else {
         math = new MathFunctions(party, iopackArr[tid], otpackArr[tid]);
     }
-    if (flag == 1) {
-        math->ln_v1(num_ops, x, y, bw_x, bw_y, s_x, s_y);
-    } else {
-        math->ln_v1(num_ops, x, y, bw_x, bw_y, s_x, s_y);
-    }
+
+    math->div_1(num_ops, x, y, bw_x, bw_y, s_x, s_y, false, true);
+
     delete math;
 }
 
